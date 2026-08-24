@@ -1,0 +1,6 @@
+streamlit>=1.35
+requests>=2.31
+urllib3<2
+pandas>=2.0
+pulp>=2.8
+plotly>=5.20
