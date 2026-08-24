@@ -26,6 +26,11 @@ html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif;
 }}
 
+.block-container {{
+    padding-top: 2rem;
+    max-width: 1400px;
+}}
+
 .pl-gradient-bar {{
     height: 6px;
     width: 100%;
@@ -43,6 +48,12 @@ h1, h2, h3, h4 {{
 
 h1 {{
     color: {PL_PINK} !important;
+    margin-bottom: 0 !important;
+}}
+
+.stTabs [data-baseweb="tab-list"] {{
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }}
 
 .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
@@ -53,7 +64,16 @@ h1 {{
     font-size: 1.05rem;
 }}
 
-.stButton > button {{
+.stTabs [data-baseweb="tab-list"] button {{
+    border-radius: 8px 8px 0 0;
+    transition: background-color 0.15s ease;
+}}
+
+.stTabs [data-baseweb="tab-list"] button:hover {{
+    background-color: rgba(233, 0, 82, 0.08);
+}}
+
+.stButton > button, .stDownloadButton > button {{
     font-family: 'Barlow Condensed', sans-serif;
     font-weight: 700;
     text-transform: uppercase;
@@ -61,11 +81,25 @@ h1 {{
     background-color: {PL_PINK};
     color: white;
     border: none;
+    border-radius: 8px;
+    padding: 0.55rem 1.25rem;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }}
 
-.stButton > button:hover {{
+.stButton > button:hover, .stDownloadButton > button:hover {{
     background-color: {PL_PURPLE};
     color: {PL_CYAN};
+}}
+
+.stButton > button:active {{
+    transform: scale(0.98);
+}}
+
+[data-testid="stMetric"] {{
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
 }}
 
 [data-testid="stMetricValue"] {{
@@ -86,9 +120,36 @@ h1 {{
 [data-testid="stMetricLabel"] {{
     font-family: 'Inter', sans-serif;
     text-transform: uppercase;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     letter-spacing: 0.05em;
     opacity: 0.8;
+}}
+
+[data-testid="stExpander"] {{
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+}}
+
+[data-testid="stDataFrame"] {{
+    border-radius: 10px;
+    overflow: hidden;
+}}
+
+@media (max-width: 640px) {{
+    .block-container {{
+        padding-left: 1rem;
+        padding-right: 1rem;
+        padding-top: 1.25rem;
+    }}
+    h1 {{
+        font-size: 2.1rem !important;
+    }}
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
+        font-size: 0.9rem;
+    }}
+    .stButton > button, .stDownloadButton > button {{
+        width: 100%;
+    }}
 }}
 
 </style>
@@ -174,7 +235,21 @@ def build_player_table(bootstrap):
 
     df["player"] = df["first_name"] + " " + df["second_name"]
     df["price"] = df["now_cost"] / 10.0
-    for col in ["form", "points_per_game", "selected_by_percent", "ict_index", "chance_of_playing_next_round"]:
+    numeric_cols = [
+        "form",
+        "points_per_game",
+        "selected_by_percent",
+        "ict_index",
+        "chance_of_playing_next_round",
+        "goals_scored",
+        "assists",
+        "clean_sheets",
+        "expected_goals",
+        "expected_assists",
+        "expected_goals_conceded",
+        "saves",
+    ]
+    for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     return df[
@@ -195,8 +270,32 @@ def build_player_table(bootstrap):
             "minutes",
             "status",
             "chance_of_playing_next_round",
+            "goals_scored",
+            "assists",
+            "clean_sheets",
+            "expected_goals",
+            "expected_assists",
+            "expected_goals_conceded",
+            "saves",
         ]
     ]
+
+
+STATUS_LABELS = {
+    "a": "Available",
+    "d": "Doubtful",
+    "i": "Injured",
+    "s": "Suspended",
+    "u": "Unavailable",
+    "n": "Not eligible",
+}
+
+
+def format_status(row):
+    label = STATUS_LABELS.get(row["status"], "Unknown")
+    if row["status"] == "d" and pd.notna(row["chance_of_playing_next_round"]):
+        label = f"Doubtful ({int(row['chance_of_playing_next_round'])}%)"
+    return label
 
 
 def render_last_updated(label, fetched_at, is_stale_fallback, error):
@@ -210,12 +309,12 @@ def render_last_updated(label, fetched_at, is_stale_fallback, error):
         st.caption(f"{label} last updated: {fetched_at_local}")
 
 
-def render_players_tab(bootstrap, fixtures, fx_error):
+def render_players_tab(bootstrap, fixtures, fx_error, manual_refresh):
     players = build_player_table(bootstrap)
 
     st.subheader("Players")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4, vertical_alignment="center")
     with col1:
         positions = st.multiselect(
             "Position", sorted(players["position"].dropna().unique().tolist())
@@ -244,10 +343,21 @@ def render_players_tab(bootstrap, fixtures, fx_error):
     if name_search:
         filtered = filtered[filtered["player"].str.contains(name_search, case=False, na=False)]
 
+    display_df = opt.compute_underlying_form(filtered)
+
+    with st.spinner("Fetching last-season stats for all players (first time only)..."):
+        prior_stats, _, _, _ = load_prior_season_stats(tuple(players["id"]), force_refresh=manual_refresh)
+    display_df["last_season_ppg"] = pd.to_numeric(
+        display_df["id"].astype(str).map(lambda i: prior_stats.get(i, {}).get("points_per_90")),
+        errors="coerce",
+    )
+    display_df["status_label"] = display_df.apply(format_status, axis=1)
+
     sort_labels = {
         "total_points": "Total Points",
-        "form": "Form",
+        "underlying_form": "Form",
         "points_per_game": "Points Per Game",
+        "last_season_ppg": "Last Season PPG",
         "price": "Price",
         "selected_by_percent": "Selected By %",
         "ict_index": "ICT Index",
@@ -258,28 +368,47 @@ def render_players_tab(bootstrap, fixtures, fx_error):
         index=0,
         format_func=lambda c: sort_labels[c],
     )
-    filtered = filtered.sort_values(sort_col, ascending=False)
+    display_df = display_df.sort_values(sort_col, ascending=False, na_position="last")
+    # Pre-formatted as text (rather than a NumberColumn) so missing values render as
+    # "—" instead of Streamlit's NaN-in-NumberColumn "None" text.
+    display_df["last_season_ppg_display"] = display_df["last_season_ppg"].apply(
+        lambda v: f"{v:.1f}" if pd.notna(v) else "—"
+    )
 
+    display_cols = {
+        "player": "Player",
+        "team_name": "Team",
+        "position": "Pos",
+        "price": "£m",
+        "underlying_form": "Form",
+        "total_points": "Pts",
+        "points_per_game": "PPG",
+        "last_season_ppg_display": "Last Season PPG",
+        "selected_by_percent": "Owned %",
+        "ict_index": "ICT",
+        "minutes": "Mins",
+        "status_label": "Status",
+    }
     st.dataframe(
-        filtered.drop(columns=["id", "team"]).rename(
-            columns={
-                "player": "Player",
-                "web_name": "Known as",
-                "team_name": "Team",
-                "team_short": "",
-                "position": "Pos",
-                "price": "£m",
-                "form": "Form",
-                "total_points": "Pts",
-                "points_per_game": "PPG",
-                "selected_by_percent": "Owned %",
-                "ict_index": "ICT",
-                "minutes": "Mins",
-                "status": "Status",
-            }
-        ),
+        display_df[list(display_cols)].rename(columns=display_cols),
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "Form": st.column_config.NumberColumn(
+                format="%.1f",
+                help=(
+                    "Points-per-90 estimate from underlying process stats (expected goals, "
+                    "expected assists, clean-sheet likelihood, saves) — not the same as recent "
+                    "points, which can be lucky/unlucky in small samples."
+                ),
+            ),
+            "Last Season PPG": st.column_config.TextColumn(
+                help=(
+                    "Points per 90 minutes last season. '—' means no qualifying prior season "
+                    "(promoted-team debutant, new-to-the-league signing, or too few minutes)."
+                ),
+            ),
+        },
     )
 
     st.caption(f"{len(filtered)} of {len(players)} players shown.")
@@ -296,7 +425,7 @@ def render_fixtures_tab(bootstrap, fixtures_data, fx_error):
     default_start = fx.next_gameweek(bootstrap)
 
     st.subheader("Fixture difficulty ticker")
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2, vertical_alignment="center")
     with col1:
         start_gw = st.number_input(
             "Starting gameweek", min_value=1, max_value=38, value=default_start
@@ -311,7 +440,7 @@ def render_fixtures_tab(bootstrap, fixtures_data, fx_error):
     st.caption("Lower FDR (green) = easier fixture. Color scale: 1 easiest → 5 hardest.")
 
     st.markdown(f"#### Best & worst runs (GW{int(start_gw)}–GW{int(start_gw) + int(num_gws) - 1})")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2, vertical_alignment="center")
     with c1:
         st.caption("Easiest average fixtures")
         best = avg_fdr.sort_values().head(5).rename("Avg FDR").to_frame()
@@ -339,16 +468,16 @@ def render_fixtures_tab(bootstrap, fixtures_data, fx_error):
         score = (
             f"{f['team_h_score']}-{f['team_a_score']}"
             if f.get("finished")
-            else "vs"
+            else "—"
         )
         rows.append(
             {
                 "Kickoff": kickoff_local,
                 "Home": team_name.get(f["team_h"], "?"),
                 "FDR (H)": f["team_h_difficulty"],
-                "": score,
                 "Away": team_name.get(f["team_a"], "?"),
                 "FDR (A)": f["team_a_difficulty"],
+                "Score": score,
             }
         )
     fixtures_df = pd.DataFrame(rows).sort_values("Kickoff")
@@ -419,7 +548,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
             value=str(saved_team_id) if saved_team_id else "",
             help="The number in the URL when viewing your own team's 'Points' page on the FPL site.",
         )
-        submitted = st.form_submit_button("Save team ID")
+        submitted = st.form_submit_button("Save team ID", use_container_width=True)
 
     if submitted:
         team_id_input = team_id_input.strip()
@@ -437,7 +566,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 st.success(f"Saved team ID {candidate_id}.")
 
     if saved_team_id:
-        if st.button("🗑️ Clear my team data"):
+        if st.button("🗑️ Clear my team data", use_container_width=True):
             cache_delete(f"entry:{saved_team_id}")
             cache_delete(f"entry-history:{saved_team_id}")
             cache_delete_prefix(f"entry-picks:{saved_team_id}:")
@@ -490,7 +619,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     st.subheader(f"{entry.get('name', 'My team')} — {entry.get('player_first_name', '')} {entry.get('player_last_name', '')}")
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5 = st.columns(5, vertical_alignment="center")
     m1.metric("Overall points", entry.get("summary_overall_points"))
     m2.metric("Overall rank", f"{entry.get('summary_overall_rank'):,}" if entry.get("summary_overall_rank") else "—")
     m3.metric(f"GW{gw} points", gw_info.get("points"))
@@ -499,7 +628,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     free_transfers = team.estimate_free_transfers(history)
     active_chip = picks.get("active_chip")
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2, vertical_alignment="center")
     c1.metric("Free transfers (estimated)", free_transfers)
     c2.metric("Active chip this GW", active_chip or "None")
 
@@ -611,7 +740,7 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
 
     default_start_gw = fx.next_gameweek(bootstrap)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3, vertical_alignment="center")
     with col1:
         budget = st.number_input("Budget (£m)", min_value=80.0, max_value=100.0, value=100.0, step=0.5)
     with col2:
@@ -630,7 +759,7 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
             "Higher values increasingly reward using up the full budget, even trading a little "
             "score for pricier players once cheaper ones score about the same."
         )
-        fc1, fc2 = st.columns(2)
+        fc1, fc2 = st.columns(2, vertical_alignment="center")
         with fc1:
             fixture_weight = st.slider("Weight on fixture difficulty", 0.0, 1.0, 0.5, 0.1)
         with fc2:
@@ -664,7 +793,7 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
         )
         return scored
 
-    if st.button("Run optimizer"):
+    if st.button("Run optimizer", use_container_width=True):
         scored = score_with_all_adjustments(players)
         squad_df = opt.optimize_squad(
             scored,
@@ -678,7 +807,7 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
         else:
             starters = squad_df[squad_df["is_starting"]]
             bench = squad_df[~squad_df["is_starting"]]
-            m1, m2, m3 = st.columns(3)
+            m1, m2, m3 = st.columns(3, vertical_alignment="center")
             m1.metric("Formation", opt.formation_label(squad_df))
             m2.metric("Squad cost", f"£{squad_df['price'].sum():.1f}m")
             m3.metric("Predicted score (XI)", f"{starters['score'].sum():.1f}")
@@ -712,13 +841,13 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
     bank = picks["entry_history"].get("bank", 0) / 10.0
     free_transfers = team.estimate_free_transfers(entry_history)
 
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2, vertical_alignment="center")
     c1.metric("Bank", f"£{bank:.1f}m")
     c2.metric("Free transfers (estimated)", free_transfers)
 
     num_transfers = st.slider("Number of transfers to suggest", 1, 5, min(free_transfers, 5))
 
-    if st.button("Suggest transfers"):
+    if st.button("Suggest transfers", use_container_width=True):
         scored = score_with_all_adjustments(players)
         suggestions = opt.suggest_transfers(
             current_ids, scored, bank=bank, num_transfers=num_transfers, free_transfers=free_transfers
@@ -750,12 +879,11 @@ if "did_initial_refresh" not in st.session_state:
 else:
     auto_refresh = False
 
-title_col, refresh_col = st.columns([5, 1])
+title_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
 with title_col:
     st.title("Doctor Fergie")
 with refresh_col:
-    st.markdown("<div style='margin-top: 1.6rem'></div>", unsafe_allow_html=True)
-    manual_refresh = st.button("🔄 Refresh")
+    manual_refresh = st.button("🔄 Refresh", use_container_width=True)
 
 force_refresh = auto_refresh or manual_refresh
 
@@ -780,7 +908,7 @@ tab_players, tab_fixtures, tab_my_team, tab_optimizer = st.tabs(
     ["Players", "Fixtures", "My Team", "Optimizer"]
 )
 with tab_players:
-    render_players_tab(bootstrap, fixtures, fx_error)
+    render_players_tab(bootstrap, fixtures, fx_error, manual_refresh)
 with tab_fixtures:
     render_fixtures_tab(bootstrap, fixtures, fx_error)
 with tab_my_team:

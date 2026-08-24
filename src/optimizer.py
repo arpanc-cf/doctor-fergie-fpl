@@ -1,9 +1,10 @@
 """Squad optimizer (PuLP) and greedy transfer suggester.
 
 The optimizer maximizes a simple points-prediction proxy — a blend of
-recent form and season points-per-game — not a real points forecast.
-Treat its output as a starting point for your own judgement, not gospel;
-"can refine later" per the project brief.
+underlying form (process stats: xG, xA, clean-sheet likelihood, saves)
+and season points-per-game — not a real points forecast. Treat its output
+as a starting point for your own judgement, not gospel; "can refine
+later" per the project brief.
 """
 
 import pulp
@@ -19,6 +20,15 @@ BENCH_WEIGHT = 0.02  # keeps bench selection meaningful without competing with t
 UNAVAILABLE_STATUSES = {"i", "s", "u"}  # injured, suspended, unavailable/left club
 SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, at budget_weight=1
 
+# FPL's own points-per-event values, used to convert underlying process
+# stats (xG, xA, clean sheet likelihood, saves) into a points-equivalent
+# "underlying form" — see compute_underlying_form.
+GOAL_POINTS = {"GKP": 6, "DEF": 6, "MID": 5, "FWD": 4}
+CLEAN_SHEET_POINTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
+ASSIST_POINTS = 3
+SAVE_POINTS_PER_SAVE = 1 / 3
+MIN_MINUTES_FOR_UNDERLYING_FORM = 60  # ~1 full match; below this, per-90 rates are wild noise
+
 # The only DEF-MID-FWD splits of a valid FPL starting XI (1 GK + 10 outfield,
 # 3-5 DEF, 2-5 MID, 1-3 FWD) — the same 8 formations selectable in the FPL app.
 VALID_FORMATIONS = ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1", "5-2-3", "5-3-2", "5-4-1"]
@@ -29,13 +39,51 @@ def parse_formation(formation):
     return {"GKP": 1, "DEF": d, "MID": m, "FWD": f}
 
 
-def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
-    """Add a 'score' column: a blend of recent form and points-per-game,
-    scaled down for players who are doubtful/injured per their listed
-    chance of playing next round.
+def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_FORM):
+    """Add an 'underlying_form' column: a points-per-90 estimate built from
+    process stats (expected goals, expected assists, clean-sheet
+    likelihood, saves) rather than points already scored — deliberately
+    independent of total_points/points_per_game, since early in a season
+    FPL's own 'form' field is just a recent-points average that collapses
+    to the same number as points-per-game and total points (there's only
+    been one or two gameweeks to average over).
+
+    Each stat is weighted by FPL's own points-per-event values, which
+    differ by position (e.g. a defender's clean sheet is worth 4pts, a
+    forward's is worth 0) — so a defender racking up clean sheets and a
+    forward racking up expected goals both surface, appropriately.
+
+    Clean-sheet likelihood is approximated as 1 - expected_goals_conceded
+    per 90 (clipped to [0, 1]) — a rough but explainable proxy, not a real
+    probability model. Players under min_minutes get 0: with so few
+    minutes, a per-90 rate is more noise than signal (a single stoppage-time
+    cameo goal would otherwise imply an absurd scoring rate).
     """
     df = players_df.copy()
-    base = form_weight * df["form"].fillna(0) + ppg_weight * df["points_per_game"].fillna(0)
+    minutes = df["minutes"].fillna(0)
+    per90 = 90.0 / minutes.clip(lower=1)
+
+    xg90 = df["expected_goals"].fillna(0) * per90
+    xa90 = df["expected_assists"].fillna(0) * per90
+    xgc90 = df["expected_goals_conceded"].fillna(0) * per90
+    saves90 = df["saves"].fillna(0) * per90
+
+    goal_pts = df["position"].map(GOAL_POINTS).fillna(4)
+    cs_pts = df["position"].map(CLEAN_SHEET_POINTS).fillna(0)
+    cs_likelihood = (1 - xgc90).clip(lower=0, upper=1)
+
+    underlying = xg90 * goal_pts + xa90 * ASSIST_POINTS + cs_likelihood * cs_pts + saves90 * SAVE_POINTS_PER_SAVE
+    df["underlying_form"] = underlying.where(minutes >= min_minutes, 0.0)
+    return df
+
+
+def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
+    """Add a 'score' column: a blend of underlying form (see
+    compute_underlying_form) and points-per-game, scaled down for players
+    who are doubtful/injured per their listed chance of playing next round.
+    """
+    df = compute_underlying_form(players_df)
+    base = form_weight * df["underlying_form"].fillna(0) + ppg_weight * df["points_per_game"].fillna(0)
 
     availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
     df["score"] = base * availability
