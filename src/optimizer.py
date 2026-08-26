@@ -1,10 +1,11 @@
 """Squad optimizer (PuLP) and greedy transfer suggester.
 
 The optimizer maximizes a simple points-prediction proxy — a blend of
-underlying form (process stats: xG, xA, clean-sheet likelihood, saves)
-and season points-per-game — not a real points forecast. Treat its output
-as a starting point for your own judgement, not gospel; "can refine
-later" per the project brief.
+underlying form (process stats: xG, xA, clean-sheet likelihood, saves,
+threat/creativity, defensive-contribution likelihood) and season
+points-per-game — not a real points forecast. Treat its output as a
+starting point for your own judgement, not gospel; "can refine later"
+per the project brief.
 """
 
 import pulp
@@ -28,6 +29,20 @@ CLEAN_SHEET_POINTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
 ASSIST_POINTS = 3
 SAVE_POINTS_PER_SAVE = 1 / 3
 MIN_MINUTES_FOR_UNDERLYING_FORM = 60  # ~1 full match; below this, per-90 rates are wild noise
+
+# Threat/creativity are FPL's own ICT-index components (shot-based attacking
+# threat, chance-creation) — the closest public proxy for shots/shots-on-target
+# and chances-created, since the FPL API doesn't expose those directly. Scaled
+# down from their raw index units so a very high performer adds a few
+# points-equivalent, not enough to swamp the goal/assist-based components.
+ICT_COMPONENT_SCALE = 0.03
+
+# FPL's 2025/26 "defensive contribution" bonus: +2 pts in a match once combined
+# defensive actions (tackles + interceptions + clearances/blocks, plus
+# recoveries for MID/FWD) clears a threshold. Goalkeepers aren't eligible.
+# This is the closest available proxy for tackles/duels-won/clearances.
+DEFENSIVE_CONTRIBUTION_POINTS = 2
+DEFENSIVE_CONTRIBUTION_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
 
 # The only DEF-MID-FWD splits of a valid FPL starting XI (1 GK + 10 outfield,
 # 3-5 DEF, 2-5 MID, 1-3 FWD) — the same 8 formations selectable in the FPL app.
@@ -58,6 +73,16 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
     probability model. Players under min_minutes get 0: with so few
     minutes, a per-90 rate is more noise than signal (a single stoppage-time
     cameo goal would otherwise imply an absurd scoring rate).
+
+    Also folds in, for all positions, a small threat/creativity component
+    (FPL's own ICT-index proxies for shot volume and chance creation — the
+    API doesn't expose raw shots/shots-on-target/chances-created), and for
+    outfield positions an estimated defensive-contribution points
+    likelihood (built from tackles + interceptions + clearances/blocks,
+    plus recoveries for MID/FWD — the closest available proxy for
+    tackles-won/duels-won/clearances, since the FPL API doesn't expose
+    those individually). Goalkeepers aren't eligible for defensive
+    contribution points under FPL's rules, so they get 0 for that piece.
     """
     df = players_df.copy()
     minutes = df["minutes"].fillna(0)
@@ -67,12 +92,26 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
     xa90 = df["expected_assists"].fillna(0) * per90
     xgc90 = df["expected_goals_conceded"].fillna(0) * per90
     saves90 = df["saves"].fillna(0) * per90
+    threat90 = df["threat"].fillna(0) * per90
+    creativity90 = df["creativity"].fillna(0) * per90
+    dc90 = df["defensive_contribution"].fillna(0) * per90
 
     goal_pts = df["position"].map(GOAL_POINTS).fillna(4)
     cs_pts = df["position"].map(CLEAN_SHEET_POINTS).fillna(0)
     cs_likelihood = (1 - xgc90).clip(lower=0, upper=1)
 
-    underlying = xg90 * goal_pts + xa90 * ASSIST_POINTS + cs_likelihood * cs_pts + saves90 * SAVE_POINTS_PER_SAVE
+    dc_threshold = df["position"].map(DEFENSIVE_CONTRIBUTION_THRESHOLD)
+    dc_likelihood = (dc90 / dc_threshold).clip(lower=0, upper=1).fillna(0)
+    dc_contribution = dc_likelihood * DEFENSIVE_CONTRIBUTION_POINTS
+
+    underlying = (
+        xg90 * goal_pts
+        + xa90 * ASSIST_POINTS
+        + cs_likelihood * cs_pts
+        + saves90 * SAVE_POINTS_PER_SAVE
+        + (threat90 + creativity90) * ICT_COMPONENT_SCALE
+        + dc_contribution
+    )
     df["underlying_form"] = underlying.where(minutes >= min_minutes, 0.0)
     return df
 

@@ -248,6 +248,9 @@ def build_player_table(bootstrap):
         "expected_assists",
         "expected_goals_conceded",
         "saves",
+        "threat",
+        "creativity",
+        "defensive_contribution",
     ]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -277,6 +280,9 @@ def build_player_table(bootstrap):
             "expected_assists",
             "expected_goals_conceded",
             "saves",
+            "threat",
+            "creativity",
+            "defensive_contribution",
         ]
     ]
 
@@ -397,9 +403,11 @@ def render_players_tab(bootstrap, fixtures, fx_error, manual_refresh):
             "Form": st.column_config.NumberColumn(
                 format="%.1f",
                 help=(
-                    "Points-per-90 estimate from underlying process stats (expected goals, "
-                    "expected assists, clean-sheet likelihood, saves) — not the same as recent "
-                    "points, which can be lucky/unlucky in small samples."
+                    "Points-per-90 estimate from underlying process stats: expected goals, "
+                    "expected assists, clean-sheet likelihood, saves, threat/creativity "
+                    "(shot/chance-creation proxies), and defensive-contribution likelihood "
+                    "(tackles/interceptions/clearances) — not the same as recent points, "
+                    "which can be lucky/unlucky in small samples."
                 ),
             ),
             "Last Season PPG": st.column_config.TextColumn(
