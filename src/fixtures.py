@@ -123,6 +123,34 @@ def team_fixture_multipliers(fixtures, start_gw, num_gws):
     return multipliers
 
 
+def next_opponents_by_team(fixtures, teams_df, start_gw, num_opponents=3, scan_gws=10):
+    """{team_id: "OPP1 (H) · OPP2 (A) · OPP3 (H)"} — each team's next
+    num_opponents actual fixtures (using short team names, for a compact
+    per-player column), not the next num_opponents gameweeks: a blank
+    gameweek is simply skipped over, and a double gameweek contributes two
+    entries toward the count. scan_gws bounds how far ahead to look for
+    fixtures without an assigned gameweek yet (postponed/unscheduled)
+    shouldn't stall the count indefinitely.
+    """
+    team_short = dict(zip(teams_df["id"], teams_df["short_name"]))
+    end_gw = min(start_gw + scan_gws - 1, 38)
+
+    per_team = defaultdict(list)
+    for f in fixtures:
+        gw = f.get("event")
+        if gw is None or not (start_gw <= gw <= end_gw):
+            continue
+        h, a = f["team_h"], f["team_a"]
+        per_team[h].append((gw, f"{team_short.get(a, '?')} (H)"))
+        per_team[a].append((gw, f"{team_short.get(h, '?')} (A)"))
+
+    result = {}
+    for team_id, entries in per_team.items():
+        entries.sort(key=lambda e: e[0])
+        result[team_id] = " · ".join(label for _, label in entries[:num_opponents])
+    return result
+
+
 def find_chip_windows(fixtures, teams_df, from_gw=1):
     """Scan the season fixture list for blank gameweeks (some teams have no
     fixture) and double gameweeks (some team has 2+ fixtures) from from_gw

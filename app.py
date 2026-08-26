@@ -725,18 +725,22 @@ SCORE_CAVEAT = (
 )
 
 
-def render_squad_table(squad_df, caption):
+def render_squad_table(squad_df, caption, next_opponents=None):
     display_cols = {
         "web_name": "Player",
-        "team_short": "Team",
+        "team_name": "Team",
         "position": "Pos",
         "price": "£m",
         "score": "Score",
         "role": "",
     }
+    df = squad_df.copy()
+    if next_opponents is not None:
+        df["next_3"] = df["team"].map(next_opponents).fillna("—")
+        display_cols["next_3"] = "Next 3"
     st.caption(caption)
     st.dataframe(
-        squad_df[list(display_cols)].rename(columns=display_cols),
+        df[list(display_cols)].rename(columns=display_cols),
         use_container_width=True,
         hide_index=True,
     )
@@ -747,6 +751,10 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
     st.caption(SCORE_CAVEAT)
 
     default_start_gw = fx.next_gameweek(bootstrap)
+    teams_df = pd.DataFrame(bootstrap["teams"])[["id", "short_name"]]
+    next_opponents = (
+        fx.next_opponents_by_team(fixtures_data, teams_df, default_start_gw) if fixtures_data else {}
+    )
 
     col1, col2, col3 = st.columns(3, vertical_alignment="center")
     with col1:
@@ -819,8 +827,8 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
             m1.metric("Formation", opt.formation_label(squad_df))
             m2.metric("Squad cost", f"£{squad_df['price'].sum():.1f}m")
             m3.metric("Predicted score (XI)", f"{starters['score'].sum():.1f}")
-            render_squad_table(starters, "Starting XI (C = captain, VC = vice-captain)")
-            render_squad_table(bench, "Bench")
+            render_squad_table(starters, "Starting XI (C = captain, VC = vice-captain)", next_opponents)
+            render_squad_table(bench, "Bench", next_opponents)
 
     st.divider()
     st.subheader("Suggest transfers for my team")

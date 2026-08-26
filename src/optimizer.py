@@ -333,10 +333,10 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
         suggestions.append(
             {
                 "out_name": best["out"]["web_name"],
-                "out_team": best["out"]["team_short"],
+                "out_team": best["out"]["team_name"],
                 "out_price": best["out"]["price"],
                 "in_name": best["in"]["web_name"],
-                "in_team": best["in"]["team_short"],
+                "in_team": best["in"]["team_name"],
                 "in_price": best["in"]["price"],
                 "score_gain": best["gain"],
                 "cost_delta": best["cost_delta"],
