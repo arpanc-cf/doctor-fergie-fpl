@@ -436,9 +436,11 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
         is_hit = n >= free_transfers
         suggestions.append(
             {
+                "out_id": best["out_id"],
                 "out_name": best["out"]["web_name"],
                 "out_team": best["out"]["team_name"],
                 "out_price": best["out"]["price"],
+                "in_id": best["in"]["id"],
                 "in_name": best["in"]["web_name"],
                 "in_team": best["in"]["team_name"],
                 "in_price": best["in"]["price"],

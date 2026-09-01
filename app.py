@@ -694,6 +694,12 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
+    include_transfer = st.checkbox(
+        "Include best suggested transfer",
+        help="Finds the single transfer (same position, affordable, respects your "
+        "estimated free-transfer count) that most improves this gameweek's Ideal XI, "
+        "and shows what your best lineup looks like after making it.",
+    )
     if fixtures_data is None:
         st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
     else:
@@ -762,6 +768,77 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     hide_index=True,
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
                 )
+
+                if include_transfer:
+                    st.divider()
+                    st.markdown("##### Ideal XI with best suggested transfer")
+                    bank = current_picks["entry_history"].get("bank", 0) / 10.0
+                    ranked_all = recommend.recommend_captain(
+                        players["id"].tolist(), players, fixtures_data, next_gw
+                    )
+                    transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
+                    transfer_suggestions = opt.suggest_transfers(
+                        current_ids, transfer_pool, bank=bank, num_transfers=1, free_transfers=free_transfers
+                    )
+                    if not transfer_suggestions:
+                        st.info(
+                            "No single transfer improves this gameweek's Ideal XI — your "
+                            "current squad is already your best option."
+                        )
+                    else:
+                        t = transfer_suggestions[0]
+                        hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
+                        st.caption(
+                            f"Suggested: **OUT {t['out_name']}** ({t['out_team']}, "
+                            f"£{t['out_price']:.1f}m) → **IN {t['in_name']}** "
+                            f"({t['in_team']}, £{t['in_price']:.1f}m){hit_label} — "
+                            f"+{t['score_gain']:.1f} expected pts this gameweek."
+                        )
+                        new_ids = [t["in_id"] if i == t["out_id"] else i for i in current_ids]
+                        new_ranked = ranked_all[ranked_all["id"].isin(new_ids)].copy()
+                        new_ranked["next_opp"] = new_ranked["team"].map(next_opp_by_team).fillna("—")
+                        new_result = (
+                            opt.best_starting_xi(new_ranked, score_col="expected_score")
+                            if not new_ranked.empty
+                            else None
+                        )
+                        if new_result is None:
+                            st.info("Couldn't determine an ideal XI after this transfer.")
+                        else:
+                            new_starting_ids, new_bench_ids, new_formation = new_result
+                            new_starters = new_ranked[new_ranked["id"].isin(new_starting_ids)].sort_values(
+                                "expected_score", ascending=False
+                            )
+                            new_bench = new_ranked[new_ranked["id"].isin(new_bench_ids)].sort_values(
+                                "expected_score", ascending=False
+                            )
+                            new_cap, new_vice = opt.pick_captain_vice(new_starters, score_col="expected_score")
+                            nm1, nm2 = st.columns(2, vertical_alignment="center")
+                            nm1.metric("Formation with transfer", new_formation)
+                            nm2.metric(
+                                "Expected score (XI) with transfer",
+                                f"{new_starters['expected_score'].sum():.1f}",
+                                delta=(
+                                    f"{new_starters['expected_score'].sum() - ideal_starters['expected_score'].sum():+.1f}"
+                                ),
+                            )
+                            new_label = f"**Suggested captain: {new_cap['web_name']}**"
+                            if new_vice is not None:
+                                new_label += f" · Vice: {new_vice['web_name']}"
+                            st.markdown(new_label)
+                            st.dataframe(
+                                new_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                            )
+                            st.caption("Bench")
+                            st.dataframe(
+                                new_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                            )
 
     st.markdown("#### Chip strategy")
     st.caption(
