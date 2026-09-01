@@ -20,6 +20,7 @@ MAX_PER_CLUB = 3
 BENCH_WEIGHT = 0.02  # keeps bench selection meaningful without competing with the XI
 UNAVAILABLE_STATUSES = {"i", "s", "u"}  # injured, suspended, unavailable/left club
 SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, at budget_weight=1
+STARTING_CHANCE_THRESHOLD = 75  # below this % chance of playing, prefer a safer alternative over raw score
 
 # FPL's own points-per-event values, used to convert underlying process
 # stats (xG, xA, clean sheet likelihood, saves) into a points-equivalent
@@ -277,6 +278,57 @@ def formation_label(squad_df):
     return f"{counts.get('DEF', 0)}-{counts.get('MID', 0)}-{counts.get('FWD', 0)}"
 
 
+def is_starting_eligible(df):
+    """True for players safe to name in a starting XI next gameweek: not
+    confirmed injured/suspended/unavailable, and not below
+    STARTING_CHANCE_THRESHOLD chance of playing (a live doubt, even if not
+    yet ruled out).
+    """
+    chance = df["chance_of_playing_next_round"].fillna(100)
+    return (chance >= STARTING_CHANCE_THRESHOLD) & (~df["status"].isin(UNAVAILABLE_STATUSES))
+
+
+def pick_captain_vice(df, score_col="score"):
+    """Pick captain/vice from df, preferring players likely to actually
+    start (see is_starting_eligible) over a higher-scoring doubt. Falls
+    back to score alone if everyone in df is below the threshold, so this
+    never fails to return a pick.
+    """
+    if df.empty:
+        return None, None
+    ordered = df.assign(_eligible=is_starting_eligible(df)).sort_values(
+        ["_eligible", score_col], ascending=[False, False]
+    )
+    cap = ordered.iloc[0]
+    vice = ordered.iloc[1] if len(ordered) > 1 else None
+    return cap, vice
+
+
+def _best_formation_from_pool(squad_df, pool_df, score_col):
+    """Try every valid formation using only players in pool_df (a subset of
+    squad_df), taking the top-N scorers at each position. Returns the best
+    {formation, starting_ids, total} by total score, or None if pool_df
+    can't fill any valid formation's position counts.
+    """
+    best = None
+    for formation in VALID_FORMATIONS:
+        counts = parse_formation(formation)
+        chosen_ids = []
+        feasible = True
+        for pos, n in counts.items():
+            pos_players = pool_df[pool_df["position"] == pos].sort_values(score_col, ascending=False)
+            if len(pos_players) < n:
+                feasible = False
+                break
+            chosen_ids.extend(pos_players.head(n)["id"].tolist())
+        if not feasible:
+            continue
+        total = squad_df[squad_df["id"].isin(chosen_ids)][score_col].sum()
+        if best is None or total > best["total"]:
+            best = {"formation": formation, "starting_ids": chosen_ids, "total": total}
+    return best
+
+
 def best_starting_xi(squad_df, score_col="score"):
     """Given a fixed 15-player squad (e.g. a manager's actual squad — no
     budget/transfers involved), pick the best-scoring valid starting XI.
@@ -291,24 +343,20 @@ def best_starting_xi(squad_df, score_col="score"):
     Returns (starting_ids, bench_ids, formation_label), or None if the
     squad doesn't have enough players at some position for any valid
     formation (shouldn't happen for a real 2/5/5/3 FPL squad).
-    """
-    best = None
-    for formation in VALID_FORMATIONS:
-        counts = parse_formation(formation)
-        chosen_ids = []
-        feasible = True
-        for pos, n in counts.items():
-            pos_players = squad_df[squad_df["position"] == pos].sort_values(score_col, ascending=False)
-            if len(pos_players) < n:
-                feasible = False
-                break
-            chosen_ids.extend(pos_players.head(n)["id"].tolist())
-        if not feasible:
-            continue
-        total = squad_df[squad_df["id"].isin(chosen_ids)][score_col].sum()
-        if best is None or total > best["total"]:
-            best = {"formation": formation, "starting_ids": chosen_ids, "total": total}
 
+    Players below STARTING_CHANCE_THRESHOLD chance of playing (see
+    is_starting_eligible) are excluded from consideration entirely on the
+    first pass — including, if needed, by picking a different formation
+    that doesn't require them, not just being outranked within their own
+    position. They're only allowed back in on a second pass if no valid
+    formation can be filled from eligible players alone (e.g. a position
+    is so thin on fit players that even the least demanding formation needs
+    more than are available).
+    """
+    eligible_df = squad_df[is_starting_eligible(squad_df)]
+    best = _best_formation_from_pool(squad_df, eligible_df, score_col)
+    if best is None:
+        best = _best_formation_from_pool(squad_df, squad_df, score_col)
     if best is None:
         return None
     starting_ids = set(best["starting_ids"])

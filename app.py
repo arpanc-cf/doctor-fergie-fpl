@@ -707,8 +707,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     "expected_score", ascending=False
                 )
 
-                cap = ideal_starters.iloc[0]
-                vice = ideal_starters.iloc[1] if len(ideal_starters) > 1 else None
+                cap, vice = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
                 im1, im2 = st.columns(2, vertical_alignment="center")
                 im1.metric("Ideal formation", ideal_formation)
                 im2.metric("Expected score (XI)", f"{ideal_starters['expected_score'].sum():.1f}")
@@ -765,8 +764,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         if ranked.empty:
             st.info("No starting XI found for this gameweek.")
         else:
-            top = ranked.iloc[0]
-            vice = ranked.iloc[1] if len(ranked) > 1 else None
+            top, vice = opt.pick_captain_vice(ranked, score_col="expected_score")
             label = f"**Suggested captain: {top['web_name']}**"
             if vice is not None:
                 label += f" · Vice: {vice['web_name']}"
