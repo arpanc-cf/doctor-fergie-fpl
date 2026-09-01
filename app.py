@@ -665,7 +665,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
     ).fillna("")
     display_cols = {
         "display_name": "Player",
-        "team_short": "Team",
+        "team_name": "Team",
         "position": "Pos",
         "price": "£m",
         "gw_points": "Pts",
@@ -787,7 +787,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
             display = ranked.rename(
                 columns={
                     "web_name": "Player",
-                    "team_short": "Team",
+                    "team_name": "Team",
                     "fixture_count": "Fixtures",
                     "next_opp": "Next",
                     "score": "Season score",
@@ -1018,7 +1018,26 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
         )
         return scored
 
-    if st.button("Run optimizer", use_container_width=True):
+    def render_optimizer_result(squad_df):
+        if squad_df is None:
+            st.error("No feasible squad found under these constraints (try a higher budget).")
+            return
+        starters = squad_df[squad_df["is_starting"]]
+        bench = squad_df[~squad_df["is_starting"]]
+        m1, m2, m3 = st.columns(3, vertical_alignment="center")
+        m1.metric("Formation", opt.formation_label(squad_df))
+        m2.metric("Squad cost", f"£{squad_df['price'].sum():.1f}m")
+        m3.metric("Predicted score (XI)", f"{starters['score'].sum():.1f}")
+        render_squad_table(starters, "Starting XI (C = captain, VC = vice-captain)", next_opponents)
+        render_squad_table(bench, "Bench", next_opponents)
+
+    run_col, max_col = st.columns(2)
+    run_clicked = run_col.button("Run optimizer", use_container_width=True)
+    maximize_clicked = max_col.button(
+        "🏆 Maximize score (ignore sliders)", use_container_width=True
+    )
+
+    if run_clicked:
         scored = score_with_all_adjustments(players)
         squad_df = opt.optimize_squad(
             scored,
@@ -1027,17 +1046,27 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
             formation=formation,
             budget_weight=budget_weight,
         )
-        if squad_df is None:
-            st.error("No feasible squad found under these constraints (try a higher budget).")
-        else:
-            starters = squad_df[squad_df["is_starting"]]
-            bench = squad_df[~squad_df["is_starting"]]
-            m1, m2, m3 = st.columns(3, vertical_alignment="center")
-            m1.metric("Formation", opt.formation_label(squad_df))
-            m2.metric("Squad cost", f"£{squad_df['price'].sum():.1f}m")
-            m3.metric("Predicted score (XI)", f"{starters['score'].sum():.1f}")
-            render_squad_table(starters, "Starting XI (C = captain, VC = vice-captain)", next_opponents)
-            render_squad_table(bench, "Bench", next_opponents)
+        render_optimizer_result(squad_df)
+
+    if maximize_clicked:
+        st.caption(
+            "Overriding every slider above — full £100.0m budget, no formation lock, pure "
+            "score maximization (no budget-utilization bonus, so nothing trades away score "
+            "just to spend more), using the recommended weighting (form 0.7 / PPG 0.3, "
+            "fixtures 0.5 over the next 5 gameweeks, last season 0.3) since the score itself "
+            "still needs some weighting to be defined at all."
+        )
+        with st.spinner("Fetching last-season stats for all players (first time only)..."):
+            prior_stats, _, _, _ = load_prior_season_stats(tuple(players["id"]))
+        max_scored = opt.compute_score(players, form_weight=0.7, ppg_weight=0.3)
+        max_scored = opt.apply_last_season_adjustment(max_scored, prior_stats, weight=0.3)
+        max_scored = opt.apply_fixture_adjustment(
+            max_scored, fixtures_data, default_start_gw, 5, fixture_weight=0.5
+        )
+        squad_df = opt.optimize_squad(
+            max_scored, budget=100.0, exclude_unavailable=True, formation=None, budget_weight=0.0
+        )
+        render_optimizer_result(squad_df)
 
     st.divider()
     st.subheader("Suggest transfers for my team")
