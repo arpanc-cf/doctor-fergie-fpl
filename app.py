@@ -602,6 +602,14 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     render_last_updated("Team info", entry_fetched_at, entry_stale, entry_error)
 
+    next_gw = fx.next_gameweek(bootstrap)
+    teams_df = pd.DataFrame(bootstrap["teams"])[["id", "short_name"]]
+    next_opp_by_team = (
+        fx.next_opponents_by_team(fixtures_data, teams_df, next_gw, num_opponents=1)
+        if fixtures_data
+        else {}
+    )
+
     current_event = entry.get("current_event") or 1
     max_event = max(current_event, 1)
     gw = st.selectbox(
@@ -651,6 +659,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     st.markdown("#### Squad")
     squad_df = team.build_squad_df(picks, players, live=live)
+    squad_df["next_opp"] = squad_df["team"].map(next_opp_by_team).fillna("—")
     display_cols = {
         "web_name": "Player",
         "team_short": "Team",
@@ -660,6 +669,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "gw_points": "Pts",
         "multiplier": "x",
         "effective_points": "Total",
+        "next_opp": "Next",
     }
     starters = squad_df[squad_df["is_starting"]]
     bench = squad_df[~squad_df["is_starting"]]
@@ -675,14 +685,13 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         hide_index=True,
     )
 
-    st.markdown(f"#### Ideal XI for next gameweek (GW{fx.next_gameweek(bootstrap)})")
+    st.markdown(f"#### Ideal XI for next gameweek (GW{next_gw})")
     st.caption(
         "Best starting XI from your actual 15-man squad for the upcoming gameweek — "
         "form/PPG adjusted for that gameweek's specific fixture (a blank scores 0, a "
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
-    next_gw = fx.next_gameweek(bootstrap)
     if fixtures_data is None:
         st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
     else:
@@ -695,6 +704,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         if current_picks is not None:
             current_ids = [p["element"] for p in current_picks["picks"]]
             ranked = recommend.recommend_captain(current_ids, players, fixtures_data, next_gw)
+            ranked["next_opp"] = ranked["team"].map(next_opp_by_team).fillna("—")
             result = opt.best_starting_xi(ranked, score_col="expected_score") if not ranked.empty else None
             if result is None:
                 st.info("Couldn't determine an ideal XI for the next gameweek.")
@@ -734,6 +744,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     "web_name": "Player",
                     "team_name": "Team",
                     "position": "Pos",
+                    "next_opp": "Next",
                     "expected_score": "Expected",
                 }
                 st.dataframe(
@@ -764,6 +775,8 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         if ranked.empty:
             st.info("No starting XI found for this gameweek.")
         else:
+            opp_by_team_for_gw = fx.next_opponents_by_team(fixtures_data, teams_df, gw, num_opponents=1)
+            ranked["next_opp"] = ranked["team"].map(opp_by_team_for_gw).fillna("—")
             top, vice = opt.pick_captain_vice(ranked, score_col="expected_score")
             label = f"**Suggested captain: {top['web_name']}**"
             if vice is not None:
@@ -774,12 +787,13 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     "web_name": "Player",
                     "team_short": "Team",
                     "fixture_count": "Fixtures",
+                    "next_opp": "Next",
                     "score": "Season score",
                     "expected_score": "Expected (this GW)",
                 }
             )
             st.dataframe(
-                display[["Player", "Team", "Fixtures", "Season score", "Expected (this GW)"]],
+                display[["Player", "Team", "Next", "Fixtures", "Season score", "Expected (this GW)"]],
                 use_container_width=True,
                 hide_index=True,
             )

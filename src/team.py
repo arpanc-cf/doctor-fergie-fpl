@@ -59,7 +59,7 @@ def build_squad_df(picks_response, players_df, live=None):
     # picks["position"] is the pick's *slot order* (1-15); players_df's
     # "position" is the GK/DEF/MID/FWD label — suffixes keep them apart.
     merged = picks.merge(
-        players_df[["id", "player", "web_name", "team_short", "position", "price"]],
+        players_df[["id", "player", "web_name", "team", "team_short", "position", "price"]],
         left_on="element",
         right_on="id",
         how="left",
