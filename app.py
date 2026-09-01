@@ -675,6 +675,82 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         hide_index=True,
     )
 
+    st.markdown(f"#### Ideal XI for next gameweek (GW{fx.next_gameweek(bootstrap)})")
+    st.caption(
+        "Best starting XI from your actual 15-man squad for the upcoming gameweek — "
+        "form/PPG adjusted for that gameweek's specific fixture (a blank scores 0, a "
+        "double counts both fixtures). Not a transfer suggestion, just the best way to "
+        "line up what you already own."
+    )
+    next_gw = fx.next_gameweek(bootstrap)
+    if fixtures_data is None:
+        st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
+    else:
+        try:
+            current_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
+        except fpl_api.FPLAPIError as e:
+            st.error(f"Could not load your current squad: {e}")
+            current_picks = None
+
+        if current_picks is not None:
+            current_ids = [p["element"] for p in current_picks["picks"]]
+            ranked = recommend.recommend_captain(current_ids, players, fixtures_data, next_gw)
+            result = opt.best_starting_xi(ranked, score_col="expected_score") if not ranked.empty else None
+            if result is None:
+                st.info("Couldn't determine an ideal XI for the next gameweek.")
+            else:
+                ideal_starting_ids, ideal_bench_ids, ideal_formation = result
+                ideal_starters = ranked[ranked["id"].isin(ideal_starting_ids)].sort_values(
+                    "expected_score", ascending=False
+                )
+                ideal_bench = ranked[ranked["id"].isin(ideal_bench_ids)].sort_values(
+                    "expected_score", ascending=False
+                )
+
+                cap = ideal_starters.iloc[0]
+                vice = ideal_starters.iloc[1] if len(ideal_starters) > 1 else None
+                im1, im2 = st.columns(2, vertical_alignment="center")
+                im1.metric("Ideal formation", ideal_formation)
+                im2.metric("Expected score (XI)", f"{ideal_starters['expected_score'].sum():.1f}")
+                label = f"**Suggested captain: {cap['web_name']}**"
+                if vice is not None:
+                    label += f" · Vice: {vice['web_name']}"
+                st.markdown(label)
+
+                actual_starting_ids = {p["element"] for p in current_picks["picks"] if p["position"] <= 11}
+                bench_to_start = ideal_starting_ids - actual_starting_ids
+                start_to_bench = actual_starting_ids - ideal_starting_ids
+                if bench_to_start or start_to_bench:
+                    id_to_name = dict(zip(players["id"], players["web_name"]))
+                    start_names = ", ".join(id_to_name.get(i, "?") for i in bench_to_start)
+                    bench_names = ", ".join(id_to_name.get(i, "?") for i in start_to_bench)
+                    st.warning(
+                        f"Differs from your currently set lineup — consider starting "
+                        f"**{start_names}** instead of **{bench_names}**."
+                    )
+                else:
+                    st.success("Your currently set lineup already matches this suggestion.")
+
+                ideal_display_cols = {
+                    "web_name": "Player",
+                    "team_name": "Team",
+                    "position": "Pos",
+                    "expected_score": "Expected",
+                }
+                st.dataframe(
+                    ideal_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                )
+                st.caption("Bench")
+                st.dataframe(
+                    ideal_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                )
+
     st.markdown("#### Captain recommendation")
     st.caption(
         f"Ranks your GW{gw} starting XI by expected score: recent form/PPG adjusted for "

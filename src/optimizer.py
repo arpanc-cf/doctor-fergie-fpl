@@ -267,6 +267,45 @@ def formation_label(squad_df):
     return f"{counts.get('DEF', 0)}-{counts.get('MID', 0)}-{counts.get('FWD', 0)}"
 
 
+def best_starting_xi(squad_df, score_col="score"):
+    """Given a fixed 15-player squad (e.g. a manager's actual squad — no
+    budget/transfers involved), pick the best-scoring valid starting XI.
+
+    Unlike optimize_squad, this doesn't need a MILP: with the 15 players
+    already fixed, a formation's position counts are the only constraint,
+    and nothing else links positions together — so for a given formation,
+    taking the top-N scorers at each position is provably optimal. This
+    just compares that result across all 8 valid formations and keeps the
+    best, which is therefore the global optimum for this squad.
+
+    Returns (starting_ids, bench_ids, formation_label), or None if the
+    squad doesn't have enough players at some position for any valid
+    formation (shouldn't happen for a real 2/5/5/3 FPL squad).
+    """
+    best = None
+    for formation in VALID_FORMATIONS:
+        counts = parse_formation(formation)
+        chosen_ids = []
+        feasible = True
+        for pos, n in counts.items():
+            pos_players = squad_df[squad_df["position"] == pos].sort_values(score_col, ascending=False)
+            if len(pos_players) < n:
+                feasible = False
+                break
+            chosen_ids.extend(pos_players.head(n)["id"].tolist())
+        if not feasible:
+            continue
+        total = squad_df[squad_df["id"].isin(chosen_ids)][score_col].sum()
+        if best is None or total > best["total"]:
+            best = {"formation": formation, "starting_ids": chosen_ids, "total": total}
+
+    if best is None:
+        return None
+    starting_ids = set(best["starting_ids"])
+    bench_ids = [i for i in squad_df["id"] if i not in starting_ids]
+    return starting_ids, bench_ids, best["formation"]
+
+
 def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfers, exclude_unavailable=True):
     """Greedily suggest up to num_transfers single swaps (same position,
     affordable, club-limit respected) that maximize score gain one at a
