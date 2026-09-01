@@ -772,14 +772,15 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 if include_transfer:
                     st.divider()
                     st.markdown("##### Ideal XI with best suggested transfer")
-                    bank = current_picks["entry_history"].get("bank", 0) / 10.0
-                    ranked_all = recommend.recommend_captain(
-                        players["id"].tolist(), players, fixtures_data, next_gw
-                    )
-                    transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
-                    transfer_suggestions = opt.suggest_transfers(
-                        current_ids, transfer_pool, bank=bank, num_transfers=1, free_transfers=free_transfers
-                    )
+                    with st.spinner("Scanning every player for the best transfer..."):
+                        bank = current_picks["entry_history"].get("bank", 0) / 10.0
+                        ranked_all = recommend.recommend_captain(
+                            players["id"].tolist(), players, fixtures_data, next_gw
+                        )
+                        transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
+                        transfer_suggestions = opt.suggest_transfers(
+                            current_ids, transfer_pool, bank=bank, num_transfers=1, free_transfers=free_transfers
+                        )
                     if not transfer_suggestions:
                         st.info(
                             "No single transfer improves this gameweek's Ideal XI — your "
