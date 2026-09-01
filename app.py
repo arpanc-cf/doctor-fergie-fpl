@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import config, fixtures as fx, fpl_api, history, optimizer as opt, recommend, team
+from src import chips, config, fixtures as fx, fpl_api, history, optimizer as opt, recommend, team
 from src.cache import delete as cache_delete, delete_prefix as cache_delete_prefix, get_or_fetch
 
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
@@ -783,6 +783,125 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 use_container_width=True,
                 hide_index=True,
             )
+
+    st.markdown("#### Chip strategy")
+    st.caption(
+        "Personalized suggestions from your actual squad, current form, and fixtures — not "
+        "just blank/double gameweek detection. Same 'simple proxy, not a real forecast' "
+        "caveat as the rest of this app applies, more so this early in the season when form "
+        "and points-per-game have few games to draw on."
+    )
+    available_chips = chips.available_chips(bootstrap, chips_used, next_gw)
+    if fixtures_data is None:
+        st.info("Fixtures unavailable this session — can't compute chip suggestions.")
+    else:
+        try:
+            chip_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
+        except fpl_api.FPLAPIError as e:
+            st.error(f"Could not load your current squad: {e}")
+            chip_picks = None
+
+        if chip_picks is not None:
+            chip_current_ids = [p["element"] for p in chip_picks["picks"]]
+            chip_ranked_next = recommend.recommend_captain(chip_current_ids, players, fixtures_data, next_gw)
+            chip_xi = (
+                opt.best_starting_xi(chip_ranked_next, score_col="expected_score")
+                if not chip_ranked_next.empty
+                else None
+            )
+
+            cols = st.columns(4)
+
+            with cols[0]:
+                st.markdown("**Bench Boost**")
+                bb = None
+                if chip_xi is not None:
+                    starting_ids, bench_ids, _ = chip_xi
+                    ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
+                    ideal_bench = chip_ranked_next[chip_ranked_next["id"].isin(bench_ids)]
+                    bb = chips.suggest_bench_boost(ideal_starters, ideal_bench)
+                if not available_chips.get("bboost"):
+                    st.caption("Already used / not available this window.")
+                elif bb is None:
+                    st.caption("Not enough data.")
+                elif bb["recommend"]:
+                    st.success(
+                        f"Good week — bench projects {bb['bench_total']:.1f} pts "
+                        f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
+                    )
+                else:
+                    st.info(
+                        f"Save it — bench projects only {bb['bench_total']:.1f} pts "
+                        f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
+                    )
+
+            with cols[1]:
+                st.markdown("**Triple Captain**")
+                tc = None
+                if chip_xi is not None:
+                    starting_ids, _, _ = chip_xi
+                    ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
+                    cap, _ = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
+                    tc = chips.suggest_triple_captain(cap)
+                if not available_chips.get("3xc"):
+                    st.caption("Already used / not available this window.")
+                elif tc is None:
+                    st.caption("Not enough data.")
+                elif tc["recommend"]:
+                    reason = "double gameweek" if tc["is_double"] else "strong fixture"
+                    st.success(
+                        f"Good week — {tc['captain_name']} projects {tc['captain_score']:.1f} "
+                        f"pts ({reason})."
+                    )
+                else:
+                    st.info(
+                        f"Save it — best captain ({tc['captain_name']}) only projects "
+                        f"{tc['captain_score']:.1f} pts."
+                    )
+
+            bank = chip_picks["entry_history"].get("bank", 0) / 10.0
+            value = chip_picks["entry_history"].get("value", 0) / 10.0
+            reset = chips.suggest_reset_chip(
+                players, chip_current_ids, fixtures_data, next_gw, budget=bank + value
+            )
+
+            with cols[2]:
+                st.markdown("**Free Hit**")
+                if not available_chips.get("freehit"):
+                    st.caption("Already used / not available this window.")
+                elif reset["recommend_freehit"]:
+                    st.success(
+                        f"Consider it — an optimal squad projects {reset['gap_next_gw'] * 100:.0f}% "
+                        f"higher ({reset['optimal_next_gw']:.1f} vs {reset['current_next_gw']:.1f} pts) "
+                        "just for this gameweek, and that gap doesn't persist over the coming weeks."
+                    )
+                elif reset["gap_next_gw"] >= chips.FREEHIT_GAP_THRESHOLD:
+                    st.info(
+                        "Save it — this gameweek's gap is real, but it doesn't go away next week "
+                        "either, so Wildcard fixes it better than a one-week Free Hit."
+                    )
+                else:
+                    st.info(
+                        f"Save it — only a {reset['gap_next_gw'] * 100:.0f}% gap to an optimal squad "
+                        "this gameweek."
+                    )
+
+            with cols[3]:
+                st.markdown("**Wildcard**")
+                if not available_chips.get("wildcard"):
+                    st.caption("Already used / not available this window.")
+                elif reset["recommend_wildcard"]:
+                    st.success(
+                        f"Consider it — your squad projects {reset['gap_lookahead'] * 100:.0f}% below "
+                        f"an optimal one ({reset['optimal_lookahead']:.1f} vs "
+                        f"{reset['current_lookahead']:.1f} pts) over the next {reset['lookahead_gws']} "
+                        "gameweeks, not just a one-off."
+                    )
+                else:
+                    st.info(
+                        f"Save it — only a {reset['gap_lookahead'] * 100:.0f}% gap to an optimal squad "
+                        f"over the next {reset['lookahead_gws']} gameweeks."
+                    )
 
     st.markdown("#### Season history")
     history_df = team.build_season_history_df(history)
