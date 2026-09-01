@@ -660,12 +660,14 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
     st.markdown("#### Squad")
     squad_df = team.build_squad_df(picks, players, live=live)
     squad_df["next_opp"] = squad_df["team"].map(next_opp_by_team).fillna("—")
+    squad_df["display_name"] = squad_df["web_name"] + squad_df["role"].map(
+        {"C": " (C)", "VC": " (VC)"}
+    ).fillna("")
     display_cols = {
-        "web_name": "Player",
+        "display_name": "Player",
         "team_short": "Team",
         "position": "Pos",
         "price": "£m",
-        "role": "",
         "gw_points": "Pts",
         "multiplier": "x",
         "effective_points": "Total",
@@ -934,14 +936,14 @@ SCORE_CAVEAT = (
 
 def render_squad_table(squad_df, caption, next_opponents=None):
     display_cols = {
-        "web_name": "Player",
+        "display_name": "Player",
         "team_name": "Team",
         "position": "Pos",
         "price": "£m",
         "score": "Score",
-        "role": "",
     }
     df = squad_df.copy()
+    df["display_name"] = df["web_name"] + df["role"].map({"C": " (C)", "VC": " (VC)"}).fillna("")
     if next_opponents is not None:
         df["next_3"] = df["team"].map(next_opponents).fillna("—")
         display_cols["next_3"] = "Next 3"
