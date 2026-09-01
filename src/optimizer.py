@@ -369,13 +369,20 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
     affordable, club-limit respected) that maximize score gain one at a
     time. Transfers beyond free_transfers are flagged as -4 point hits.
 
+    A squad member is always eligible to be the "out" side of a swap,
+    regardless of exclude_unavailable — a suspended, injured, or badly
+    doubtful player already carries a low/zero score (see compute_score),
+    so this naturally surfaces them as the top transfer-out candidate
+    whenever a better replacement exists. exclude_unavailable only keeps
+    such players out of the incoming "in" pool, since you wouldn't want to
+    buy one.
+
     This is a greedy heuristic, not a global optimum over combinations of
     simultaneous transfers — good enough for "which single swaps help most"
     without a combinatorial search.
     """
     df = players_df.reset_index(drop=True)
-    if exclude_unavailable:
-        df = df[~df["status"].isin(UNAVAILABLE_STATUSES)].reset_index(drop=True)
+    buy_pool = df[~df["status"].isin(UNAVAILABLE_STATUSES)] if exclude_unavailable else df
 
     by_id = df.set_index("id")
     squad_ids = list(current_ids)
@@ -399,10 +406,10 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
             budget_for_buy = remaining_bank + sell_price
             out_club_count_after = club_counts.get(out_row["team_name"], 0) - 1
 
-            candidates = df[
-                (df["position"] == out_row["position"])
-                & (df["price"] <= budget_for_buy)
-                & (~df["id"].isin(squad_ids))
+            candidates = buy_pool[
+                (buy_pool["position"] == out_row["position"])
+                & (buy_pool["price"] <= budget_for_buy)
+                & (~buy_pool["id"].isin(squad_ids))
             ]
             for _, in_row in candidates.iterrows():
                 if in_row["team_name"] == out_row["team_name"]:
