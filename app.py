@@ -763,43 +763,6 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
                 )
 
-    st.markdown("#### Captain recommendation")
-    st.caption(
-        f"Ranks your GW{gw} starting XI by expected score: recent form/PPG adjusted for "
-        "that gameweek's fixture difficulty (a blank gameweek scores 0, a double gameweek "
-        "counts both fixtures). A simple proxy, not a real forecast."
-    )
-    if fixtures_data is None:
-        st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
-    else:
-        starter_ids = starters["element"].tolist()
-        ranked = recommend.recommend_captain(starter_ids, players, fixtures_data, gw)
-        if ranked.empty:
-            st.info("No starting XI found for this gameweek.")
-        else:
-            opp_by_team_for_gw = fx.next_opponents_by_team(fixtures_data, teams_df, gw, num_opponents=1)
-            ranked["next_opp"] = ranked["team"].map(opp_by_team_for_gw).fillna("—")
-            top, vice = opt.pick_captain_vice(ranked, score_col="expected_score")
-            label = f"**Suggested captain: {top['web_name']}**"
-            if vice is not None:
-                label += f" · Vice: {vice['web_name']}"
-            st.markdown(label)
-            display = ranked.rename(
-                columns={
-                    "web_name": "Player",
-                    "team_name": "Team",
-                    "fixture_count": "Fixtures",
-                    "next_opp": "Next",
-                    "score": "Season score",
-                    "expected_score": "Expected (this GW)",
-                }
-            )
-            st.dataframe(
-                display[["Player", "Team", "Next", "Fixtures", "Season score", "Expected (this GW)"]],
-                use_container_width=True,
-                hide_index=True,
-            )
-
     st.markdown("#### Chip strategy")
     st.caption(
         "Personalized suggestions from your actual squad, current form, and fixtures — not "
