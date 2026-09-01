@@ -119,12 +119,21 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
 def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
     """Add a 'score' column: a blend of underlying form (see
     compute_underlying_form) and points-per-game, scaled down for players
-    who are doubtful/injured per their listed chance of playing next round.
+    who are doubtful per their listed chance of playing next round, and
+    hard-zeroed for players confirmed injured/suspended/unavailable.
+
+    The hard zero is a separate check from the chance-of-playing discount
+    on purpose: that field is usually 0 for such players too, but it isn't
+    guaranteed by the API (e.g. a suspension is calendar-certain and
+    sometimes left null rather than 0) — checking status directly means a
+    confirmed-unavailable player can never sneak into a starting XI
+    suggestion just because that one field was missing or stale.
     """
     df = compute_underlying_form(players_df)
     base = form_weight * df["underlying_form"].fillna(0) + ppg_weight * df["points_per_game"].fillna(0)
 
     availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
+    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
     df["score"] = base * availability
     return df
 
@@ -155,6 +164,7 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
     )
     has_data = last_ppg90.notna()
     availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
+    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
     df.loc[has_data, "score"] = (1 - weight) * df.loc[has_data, "score"] + weight * (
         last_ppg90[has_data] * availability[has_data]
     )
