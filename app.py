@@ -694,11 +694,18 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
+    auto_maximize_transfers = st.checkbox(
+        "Auto-maximize (find the best number of transfers, hit costs included)",
+        help="Overrides the slider below — checks every transfer count from 0 up to 5, "
+        "subtracts 4 points for each one beyond your free transfers, and uses whichever "
+        "count gives the highest net expected score for this gameweek.",
+    )
     num_transfers_to_consider = st.slider(
         "Number of transfers to consider",
         0,
         5,
         0,
+        disabled=auto_maximize_transfers,
         help="Finds up to this many transfers (same position, affordable, respects your "
         "estimated free-transfer count, applied together) that most improve this "
         "gameweek's expected score, then shows the resulting Ideal XI. 0 = just your "
@@ -773,31 +780,69 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
                 )
 
-                if num_transfers_to_consider > 0:
-                    st.divider()
-                    st.markdown(
-                        f"##### Ideal XI with up to {num_transfers_to_consider} suggested "
-                        "transfer(s)"
-                    )
+                if auto_maximize_transfers or num_transfers_to_consider > 0:
                     with st.spinner("Scanning every player for the best transfers..."):
                         bank = current_picks["entry_history"].get("bank", 0) / 10.0
                         ranked_all = recommend.recommend_captain(
                             players["id"].tolist(), players, fixtures_data, next_gw
                         )
                         transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
-                        transfer_suggestions = opt.suggest_transfers(
+                        all_suggestions = opt.suggest_transfers(
                             current_ids,
                             transfer_pool,
                             bank=bank,
-                            num_transfers=num_transfers_to_consider,
+                            num_transfers=5,
                             free_transfers=free_transfers,
                         )
-                    if not transfer_suggestions:
-                        st.info(
-                            "No transfer improves this gameweek's expected score — your "
-                            "current squad is already your best option."
-                        )
+
+                        def _apply_transfers(k):
+                            ids = list(current_ids)
+                            for t in all_suggestions[:k]:
+                                ids = [t["in_id"] if i == t["out_id"] else i for i in ids]
+                            return ids
+
+                        def _net_expected_score(k):
+                            hypo_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(k))]
+                            hypo_result = opt.best_starting_xi(hypo_ranked, score_col="expected_score")
+                            if hypo_result is None:
+                                return None
+                            hypo_starters = hypo_ranked[hypo_ranked["id"].isin(hypo_result[0])]
+                            hits = sum(4 for t in all_suggestions[:k] if t["is_hit"])
+                            return hypo_starters["expected_score"].sum() - hits
+
+                        if auto_maximize_transfers:
+                            best_k, best_net = 0, ideal_starters["expected_score"].sum()
+                            for k in range(1, len(all_suggestions) + 1):
+                                net = _net_expected_score(k)
+                                if net is not None and net > best_net:
+                                    best_k, best_net = k, net
+                            num_to_use = best_k
+                        else:
+                            num_to_use = num_transfers_to_consider
+
+                    transfer_suggestions = all_suggestions[:num_to_use]
+
+                    if num_to_use == 0:
+                        if auto_maximize_transfers:
+                            st.info(
+                                "No transfer beats your current squad once hit costs are "
+                                "subtracted — 0 transfers is your net-best option, so the "
+                                "Ideal XI above already reflects it."
+                            )
+                        else:
+                            st.info(
+                                "No transfer improves this gameweek's expected score — your "
+                                "current squad is already your best option."
+                            )
                     else:
+                        st.divider()
+                        st.markdown(f"##### Ideal XI with {num_to_use} suggested transfer(s)")
+                        if auto_maximize_transfers:
+                            st.caption(
+                                f"Auto-maximize picked {num_to_use} transfer(s) — the highest "
+                                "net expected score across every count from 0 to 5, hit costs "
+                                "included."
+                            )
                         for i, t in enumerate(transfer_suggestions, start=1):
                             hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
                             st.markdown(
@@ -807,10 +852,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             )
                             st.caption(f"Expected-score gain: +{t['score_gain']:.1f} this gameweek")
 
-                        new_ids = list(current_ids)
-                        for t in transfer_suggestions:
-                            new_ids = [t["in_id"] if i == t["out_id"] else i for i in new_ids]
-                        new_ranked = ranked_all[ranked_all["id"].isin(new_ids)].copy()
+                        new_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(num_to_use))].copy()
                         new_ranked["next_opp"] = new_ranked["team"].map(next_opp_by_team).fillna("—")
                         new_result = (
                             opt.best_starting_xi(new_ranked, score_col="expected_score")
