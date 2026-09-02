@@ -11,19 +11,28 @@ def estimate_free_transfers(history):
 
     The FPL API doesn't expose "free transfers remaining" directly, so this
     replicates the standard (2024/25+) ruleset from community knowledge: +1
-    free transfer per gameweek from GW2 onward, capped at 5, minus transfers
-    made beyond any already-free ones. A wildcard/free-hit gameweek leaves
-    the banked count untouched. Treat this as an estimate, not ground truth
-    — re-check against the FPL app if it ever looks off after a rule change.
+    free transfer per gameweek from the manager's second played gameweek
+    onward, capped at 5, minus transfers made beyond any already-free ones.
+    A wildcard/free-hit gameweek leaves the banked count untouched. Treat
+    this as an estimate, not ground truth — re-check against the FPL app
+    if it ever looks off after a rule change.
+
+    The "squad selection, not a transfer gameweek" skip applies to the
+    manager's *first* played gameweek, not always GW1 — a manager who
+    joined mid-season (started_event > 1, e.g. a late signup) has no GW1
+    entry at all, and their first entry is that squad-selection gameweek.
     """
     current = history.get("current", [])
+    if not current:
+        return 1
     chips_by_event = {c["event"]: c["name"] for c in history.get("chips", [])}
+    first_event = min(gw["event"] for gw in current)
 
     ft = 1
     for gw in sorted(current, key=lambda g: g["event"]):
         event = gw["event"]
-        if event == 1:
-            continue  # opening squad selection, not a transfer gameweek
+        if event == first_event:
+            continue  # squad selection, not a transfer gameweek
         if chips_by_event.get(event) in ("wildcard", "freehit"):
             continue
         transfers_made = gw.get("event_transfers", 0)
