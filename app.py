@@ -694,11 +694,15 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
-    include_transfer = st.checkbox(
-        "Include best suggested transfer",
-        help="Finds the single transfer (same position, affordable, respects your "
-        "estimated free-transfer count) that most improves this gameweek's Ideal XI, "
-        "and shows what your best lineup looks like after making it.",
+    num_transfers_to_consider = st.slider(
+        "Number of transfers to consider",
+        0,
+        5,
+        0,
+        help="Finds up to this many transfers (same position, affordable, respects your "
+        "estimated free-transfer count, applied together) that most improve this "
+        "gameweek's expected score, then shows the resulting Ideal XI. 0 = just your "
+        "current squad, no transfers.",
     )
     if fixtures_data is None:
         st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
@@ -769,33 +773,43 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
                 )
 
-                if include_transfer:
+                if num_transfers_to_consider > 0:
                     st.divider()
-                    st.markdown("##### Ideal XI with best suggested transfer")
-                    with st.spinner("Scanning every player for the best transfer..."):
+                    st.markdown(
+                        f"##### Ideal XI with up to {num_transfers_to_consider} suggested "
+                        "transfer(s)"
+                    )
+                    with st.spinner("Scanning every player for the best transfers..."):
                         bank = current_picks["entry_history"].get("bank", 0) / 10.0
                         ranked_all = recommend.recommend_captain(
                             players["id"].tolist(), players, fixtures_data, next_gw
                         )
                         transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
                         transfer_suggestions = opt.suggest_transfers(
-                            current_ids, transfer_pool, bank=bank, num_transfers=1, free_transfers=free_transfers
+                            current_ids,
+                            transfer_pool,
+                            bank=bank,
+                            num_transfers=num_transfers_to_consider,
+                            free_transfers=free_transfers,
                         )
                     if not transfer_suggestions:
                         st.info(
-                            "No single transfer improves this gameweek's Ideal XI — your "
+                            "No transfer improves this gameweek's expected score — your "
                             "current squad is already your best option."
                         )
                     else:
-                        t = transfer_suggestions[0]
-                        hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
-                        st.caption(
-                            f"Suggested: **OUT {t['out_name']}** ({t['out_team']}, "
-                            f"£{t['out_price']:.1f}m) → **IN {t['in_name']}** "
-                            f"({t['in_team']}, £{t['in_price']:.1f}m){hit_label} — "
-                            f"+{t['score_gain']:.1f} expected pts this gameweek."
-                        )
-                        new_ids = [t["in_id"] if i == t["out_id"] else i for i in current_ids]
+                        for i, t in enumerate(transfer_suggestions, start=1):
+                            hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
+                            st.markdown(
+                                f"**{i}. OUT:** {t['out_name']} ({t['out_team']}, "
+                                f"£{t['out_price']:.1f}m) → **IN:** {t['in_name']} "
+                                f"({t['in_team']}, £{t['in_price']:.1f}m){hit_label}"
+                            )
+                            st.caption(f"Expected-score gain: +{t['score_gain']:.1f} this gameweek")
+
+                        new_ids = list(current_ids)
+                        for t in transfer_suggestions:
+                            new_ids = [t["in_id"] if i == t["out_id"] else i for i in new_ids]
                         new_ranked = ranked_all[ranked_all["id"].isin(new_ids)].copy()
                         new_ranked["next_opp"] = new_ranked["team"].map(next_opp_by_team).fillna("—")
                         new_result = (
@@ -804,7 +818,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             else None
                         )
                         if new_result is None:
-                            st.info("Couldn't determine an ideal XI after this transfer.")
+                            st.info("Couldn't determine an ideal XI after these transfers.")
                         else:
                             new_starting_ids, new_bench_ids, new_formation = new_result
                             new_starters = new_ranked[new_ranked["id"].isin(new_starting_ids)].sort_values(
@@ -814,14 +828,21 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                                 "expected_score", ascending=False
                             )
                             new_cap, new_vice = opt.pick_captain_vice(new_starters, score_col="expected_score")
-                            nm1, nm2 = st.columns(2, vertical_alignment="center")
-                            nm1.metric("Formation with transfer", new_formation)
+                            total_hits = sum(4 for t in transfer_suggestions if t["is_hit"])
+                            nm1, nm2, nm3 = st.columns(3, vertical_alignment="center")
+                            nm1.metric("Formation with transfers", new_formation)
                             nm2.metric(
-                                "Expected score (XI) with transfer",
+                                "Expected score (XI) with transfers",
                                 f"{new_starters['expected_score'].sum():.1f}",
                                 delta=(
                                     f"{new_starters['expected_score'].sum() - ideal_starters['expected_score'].sum():+.1f}"
                                 ),
+                            )
+                            nm3.metric(
+                                "Transfer-hit cost",
+                                f"-{total_hits}",
+                                help="Points lost to -4 hits on transfers beyond your free "
+                                "transfers, not yet subtracted from the expected score above.",
                             )
                             new_label = f"**Suggested captain: {new_cap['web_name']}**"
                             if new_vice is not None:
@@ -1108,60 +1129,6 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
             max_scored, budget=100.0, exclude_unavailable=True, formation=None, budget_weight=0.0
         )
         render_optimizer_result(squad_df)
-
-    st.divider()
-    st.subheader("Suggest transfers for my team")
-    st.caption("Uses the same form/fixture weighting settings as the squad builder above.")
-
-    team_id = config.get_team_id()
-    if not team_id:
-        st.info("Save your FPL team ID in the 'My Team' tab first to get transfer suggestions.")
-        return
-
-    try:
-        entry, _, _, _ = load_entry(team_id, force_refresh=force_refresh)
-        entry_history, _, _, _ = load_entry_history(team_id, force_refresh=force_refresh)
-    except fpl_api.FPLAPIError as e:
-        st.error(f"Could not load your team: {e}")
-        return
-
-    current_event = entry.get("current_event") or 1
-    try:
-        picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
-    except fpl_api.FPLAPIError as e:
-        st.error(f"Could not load your current squad: {e}")
-        return
-
-    current_ids = [p["element"] for p in picks["picks"]]
-    bank = picks["entry_history"].get("bank", 0) / 10.0
-    free_transfers = team.estimate_free_transfers(entry_history)
-
-    c1, c2 = st.columns(2, vertical_alignment="center")
-    c1.metric("Bank", f"£{bank:.1f}m")
-    c2.metric("Free transfers (estimated)", free_transfers)
-
-    num_transfers = st.slider("Number of transfers to suggest", 1, 5, min(free_transfers, 5))
-
-    if st.button("Suggest transfers", use_container_width=True):
-        scored = score_with_all_adjustments(players)
-        suggestions = opt.suggest_transfers(
-            current_ids, scored, bank=bank, num_transfers=num_transfers, free_transfers=free_transfers
-        )
-        if not suggestions:
-            st.info("No improving transfer found — your squad already looks strong by this proxy.")
-        else:
-            for i, s in enumerate(suggestions, start=1):
-                hit_label = " (hit: -4 pts)" if s["is_hit"] else " (free)"
-                st.markdown(
-                    f"**{i}. OUT:** {s['out_name']} ({s['out_team']}, £{s['out_price']:.1f}m) "
-                    f"→ **IN:** {s['in_name']} ({s['in_team']}, £{s['in_price']:.1f}m){hit_label}"
-                )
-                st.caption(
-                    f"Score gain: +{s['score_gain']:.1f} · Net after hit: {s['net_gain']:+.1f} · "
-                    f"Cost change: £{s['cost_delta']:+.1f}m"
-                )
-            total_net = sum(s["net_gain"] for s in suggestions)
-            st.metric("Total net score gain", f"{total_net:+.1f}")
 
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
