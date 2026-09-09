@@ -23,6 +23,20 @@ PL_SURFACE = "#28002B"  # card/table surface, one step up from the page
 PL_SURFACE_HI = "#41054B"  # hover/elevated surface, two steps up
 PL_PINK = "#FF2882"  # their actual accent pink — used sparingly, not as a fill color
 
+# The FPL API returns chip identifiers as internal codes (lowercase,
+# abbreviated), not display-ready names.
+CHIP_DISPLAY_NAMES = {
+    "wildcard": "Wildcard",
+    "freehit": "Free Hit",
+    "bboost": "Bench Boost",
+    "3xc": "Triple Captain",
+}
+
+
+def chip_display_name(code):
+    return CHIP_DISPLAY_NAMES.get(code, code.replace("_", " ").title()) if code else None
+
+
 CUSTOM_CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -224,6 +238,79 @@ hr {{
     background: rgba(255, 255, 255, 0.06);
     width: fit-content;
     margin-top: 0.15rem;
+}}
+
+/* A hand-built stat card matching stMetric's look, for cases (like an
+   active-chip indicator) that need a state st.metric can't express —
+   here, a highlighted variant for "something is actively happening". */
+.pl-stat-row {{
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}}
+
+.pl-stat-card {{
+    position: relative;
+    flex: 1;
+    min-width: 160px;
+    background: linear-gradient(160deg, {PL_SURFACE_HI} 0%, {PL_SURFACE} 65%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 0.95rem 1.1rem;
+}}
+
+.pl-stat-card::before {{
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 14px 14px 0 0;
+    background: linear-gradient(90deg, {PL_PINK}, {PL_PURPLE});
+}}
+
+.pl-stat-card--active {{
+    background: linear-gradient(160deg, rgba(255, 40, 130, 0.3) 0%, {PL_SURFACE} 75%);
+    border-color: rgba(255, 40, 130, 0.55);
+    box-shadow: 0 0 0 1px rgba(255, 40, 130, 0.2), 0 8px 22px rgba(255, 40, 130, 0.18);
+}}
+
+.pl-stat-card--active::before {{
+    background: {PL_PINK};
+    box-shadow: 0 0 12px rgba(255, 40, 130, 0.7);
+}}
+
+.pl-stat-label {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+    margin-bottom: 0.3rem;
+}}
+
+.pl-stat-value {{
+    font-family: 'Inter', sans-serif;
+    color: white;
+    font-weight: 800;
+    font-size: 1.7rem;
+    line-height: 1.2;
+}}
+
+.pl-stat-badge {{
+    display: inline-block;
+    margin-top: 0.4rem;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: {PL_PINK};
+    background: rgba(255, 40, 130, 0.15);
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
 }}
 
 [data-testid="stExpander"] {{
@@ -825,15 +912,32 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     free_transfers = team.estimate_free_transfers(history)
     active_chip = picks.get("active_chip")
-    c1, c2 = st.columns(2, vertical_alignment="center")
-    c1.metric("Free transfers (estimated)", free_transfers)
-    c2.metric("Active chip this GW", active_chip or "None")
+    active_chip_label = chip_display_name(active_chip) or "None"
+    active_card_class = "pl-stat-card pl-stat-card--active" if active_chip else "pl-stat-card"
+    active_badge = '<div class="pl-stat-badge">● Active</div>' if active_chip else ""
+    # st.markdown treats 4+ leading spaces as a Markdown code block, so this
+    # has to be built with no line-leading indentation or it renders as a
+    # broken mix of raw HTML and literal code-block text.
+    stat_row_html = (
+        '<div class="pl-stat-row">'
+        '<div class="pl-stat-card">'
+        '<div class="pl-stat-label">Free transfers (estimated)</div>'
+        f'<div class="pl-stat-value">{free_transfers}</div>'
+        "</div>"
+        f'<div class="{active_card_class}">'
+        '<div class="pl-stat-label">Active chip this GW</div>'
+        f'<div class="pl-stat-value">{active_chip_label}</div>'
+        f"{active_badge}"
+        "</div>"
+        "</div>"
+    )
+    st.markdown(stat_row_html, unsafe_allow_html=True)
 
     chips_used = history.get("chips", [])
     if chips_used:
         st.caption(
             "Chips used: "
-            + ", ".join(f"{c['name']} (GW{c['event']})" for c in chips_used)
+            + ", ".join(f"{chip_display_name(c['name'])} (GW{c['event']})" for c in chips_used)
         )
     else:
         st.caption("No chips used yet this season.")
