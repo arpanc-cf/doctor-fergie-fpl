@@ -705,11 +705,13 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
     with toggle_col2:
         maximize_budget_transfers = st.toggle(
             "Maximize budget utilization",
-            help="Among transfers that genuinely improve your expected score, picks the "
-            "most expensive affordable option outright — spending as much of your bank "
-            "as the budget allows — without ever picking a transfer that lowers your "
-            "score. Combine with 'Maximize potential score' to also auto-pick the best "
-            "transfer count; use it alone to keep the slider's manual count.",
+            help="Picks the most expensive affordable player(s) your bank allows, using "
+            "expected score to choose between similarly-priced options — spend the "
+            "budget fully, on the best players it can buy. On its own this can pick a "
+            "pricier player even if it doesn't improve your score; combine with "
+            "'Maximize potential score' so the count of transfers kept is still capped "
+            "at whatever number actually raises your net expected score — full budget "
+            "use, but only the highest score reachable that way.",
         )
     num_transfers_to_consider = st.slider(
         "Number of transfers to consider",
@@ -857,8 +859,15 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             )
                         if maximize_budget_transfers:
                             st.caption(
-                                "Maximize budget utilization is on — among score-improving "
-                                "options, these pick the most expensive affordable player(s)."
+                                "Maximize budget utilization is on — these pick the most "
+                                "expensive affordable player(s), using expected score to "
+                                "choose between similarly-priced options."
+                                + (
+                                    " Capped to the count that maximizes net expected score, "
+                                    "since 'Maximize potential score' is also on."
+                                    if auto_maximize_transfers
+                                    else ""
+                                )
                             )
                         for i, t in enumerate(transfer_suggestions, start=1):
                             hit_label = " (-4 hit)" if t["is_hit"] else " (free)"

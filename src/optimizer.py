@@ -388,14 +388,20 @@ def suggest_transfers(
     such players out of the incoming "in" pool, since you wouldn't want to
     buy one.
 
-    budget_weight (0-1) shifts candidate selection toward spending more of
-    the bank. At 1 (full weight) it picks outright the most expensive
-    affordable option among genuinely score-improving swaps (gain > 0) —
-    i.e. "get the priciest player(s) the budget allows" — rather than a
-    small nudge; values between 0 and 1 blend toward that. It never turns
-    a non-improving swap (gain <= 0) into a suggestion; it only chooses
-    among the improving ones, so a higher weight can still yield a
-    cheaper pick if that's the only one that actually helps.
+    budget_weight (0-1) changes what "best" means for candidate selection.
+    At 0 (default), only genuinely score-improving swaps (gain > 0) are
+    ever considered, and the highest-gain one wins — pure score
+    maximization. At 1 (full weight, "maximize budget utilization"), the
+    goal flips to spending as much of the bank as possible: any affordable
+    candidate is eligible (not just improving ones), and price dominates
+    the comparison, so the most expensive affordable option always wins,
+    with score only breaking ties among similarly-priced candidates —
+    "the best-scoring way to spend the budget," not "only ever improve,
+    then spend." Combined with a transfer-count search that maximizes net
+    score (see the "Maximize potential score" caller-side option), this
+    naturally converges on the highest score reachable while pushing
+    toward full budget use, since a spend that doesn't help is simply not
+    kept by that outer count search.
 
     This is a greedy heuristic, not a global optimum over combinations of
     simultaneous transfers — good enough for "which single swaps help most"
@@ -439,12 +445,17 @@ def suggest_transfers(
                 if club_after > MAX_PER_CLUB:
                     continue
                 gain = in_row["score"] - out_row["score"]
-                if gain <= 0:
+                if budget_weight <= 0 and gain <= 0:
                     continue
                 price_delta = in_row["price"] - sell_price
                 # At budget_weight=1, in_row["price"] * TRANSFER_BUDGET_DOMINANCE
-                # dwarfs any realistic score gain, so the priciest affordable,
-                # still-improving option always wins outright.
+                # dwarfs any realistic score gain, so the priciest affordable
+                # option always wins outright, with gain only breaking ties
+                # between equally (or near-equally) priced candidates — this
+                # is "spend the budget, picking the best score you can get for
+                # it" rather than "only ever improve, then spend." At
+                # budget_weight=0 the gain > 0 gate still applies, so pure
+                # score-maximizing mode never suggests a downgrade.
                 spend_bonus = budget_weight * in_row["price"] * TRANSFER_BUDGET_DOMINANCE
                 adjusted_gain = gain + spend_bonus
                 if best is None or adjusted_gain > best["adjusted_gain"]:
