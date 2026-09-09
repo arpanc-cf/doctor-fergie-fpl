@@ -12,27 +12,33 @@ PRIOR_SEASON_CACHE_MAX_AGE_SECONDS = 90 * 24 * 3600  # completed-season stats ne
 
 st.set_page_config(page_title="Doctor Fergie", page_icon="⚽", layout="wide")
 
-# Premier League brand palette (2016 rebrand): deep purple, magenta, cyan, lime.
-PL_PURPLE = "#3D195B"
-PL_PINK = "#E90052"
-PL_CYAN = "#04F5FF"
-PL_GREEN = "#00FF85"
+# Premier League's actual current brand system (2023 "Modern Warrior"
+# rebrand, sampled from premierleague.com's own stylesheet): a near-black
+# purple tonal scale carries the whole site, with pink used only as a
+# sparing accent — not the loud 2016-era purple/pink/cyan/green foursome
+# this file used to hardcode.
+PL_PURPLE = "#37003C"  # their signature brand purple (widget/surface fills)
+PL_BG = "#1E0021"  # page background
+PL_SURFACE = "#28002B"  # card/table surface, one step up from the page
+PL_SURFACE_HI = "#41054B"  # hover/elevated surface, two steps up
+PL_PINK = "#FF2882"  # their actual accent pink — used sparingly, not as a fill color
 
 CUSTOM_CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
+/* premierleague.com runs one typeface throughout (their own "PremierLeague"
+   cut, bold for headings) rather than pairing a display face with a body
+   face — Inter at varying weight mirrors that single-family approach,
+   since their font isn't licensed for embedding here. */
 html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif;
 }}
 
-/* Subtle depth instead of a flat fill — two soft glows anchored at the
-   corners, low enough opacity to read as ambience, not decoration. */
 .stApp {{
-    background-color: #1A0B2E;
+    background-color: {PL_BG};
     background-image:
-        radial-gradient(ellipse 900px 500px at 8% -10%, rgba(233, 0, 82, 0.10), transparent 60%),
-        radial-gradient(ellipse 900px 600px at 100% 15%, rgba(61, 25, 91, 0.55), transparent 55%);
+        radial-gradient(ellipse 1000px 600px at 15% -10%, rgba(55, 0, 60, 0.7), transparent 60%);
     background-attachment: fixed;
 }}
 
@@ -46,15 +52,16 @@ html, body, [class*="css"] {{
     width: 100%;
     margin-bottom: 1.5rem;
     border-radius: 3px;
-    background: linear-gradient(90deg, {PL_PURPLE}, {PL_PINK}, {PL_CYAN}, {PL_GREEN});
-    box-shadow: 0 0 16px rgba(233, 0, 82, 0.35);
+    background: linear-gradient(90deg, {PL_PURPLE}, {PL_PINK});
 }}
 
+/* No uppercase, no wide tracking — their real headings are bold-weight
+   Inter-like text at (slightly) negative letter-spacing, not condensed
+   display caps. */
 h1, h2, h3, h4 {{
-    font-family: 'Barlow Condensed', sans-serif !important;
+    font-family: 'Inter', sans-serif !important;
     font-weight: 800 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: -0.01em;
 }}
 
 h1 {{
@@ -67,11 +74,10 @@ h4 {{
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }}
 
-/* Give st.divider() the brand instead of a flat default gray hairline. */
 hr {{
     border: none !important;
     height: 1px !important;
-    background: linear-gradient(90deg, rgba(233, 0, 82, 0.45), rgba(4, 245, 255, 0.12), transparent) !important;
+    background: linear-gradient(90deg, rgba(255, 40, 130, 0.4), transparent) !important;
     margin: 1.1rem 0 !important;
 }}
 
@@ -82,11 +88,9 @@ hr {{
 }}
 
 .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
-    font-family: 'Barlow Condensed', sans-serif;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-size: 1.05rem;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.95rem;
 }}
 
 .stTabs [data-baseweb="tab-list"] button {{
@@ -95,32 +99,32 @@ hr {{
 }}
 
 .stTabs [data-baseweb="tab-list"] button:hover {{
-    background-color: rgba(233, 0, 82, 0.08);
+    background-color: rgba(255, 40, 130, 0.08);
 }}
 
 .stTabs [data-baseweb="tab-highlight"] {{
-    box-shadow: 0 0 8px rgba(233, 0, 82, 0.6);
+    background-color: {PL_PINK} !important;
 }}
 
+/* Pill-shaped, moderate weight, sentence case — matches the "Sign in" /
+   "Join myPL" buttons on the real site rather than a bold uppercase CTA
+   block. */
 .stButton > button, .stDownloadButton > button {{
-    font-family: 'Barlow Condensed', sans-serif;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    background-color: {PL_PINK};
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    background-color: {PL_PURPLE};
     color: white;
-    border: none;
-    border-radius: 8px;
-    padding: 0.55rem 1.25rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    padding: 0.5rem 1.3rem;
     white-space: nowrap;
-    box-shadow: 0 3px 12px rgba(233, 0, 82, 0.25);
-    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+    transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
 }}
 
 .stButton > button:hover, .stDownloadButton > button:hover {{
-    background-color: {PL_PURPLE};
-    color: {PL_CYAN};
-    box-shadow: 0 4px 16px rgba(4, 245, 255, 0.2);
+    background-color: {PL_SURFACE_HI};
+    border-color: {PL_PINK};
+    color: white;
 }}
 
 .stButton > button:active {{
@@ -132,6 +136,7 @@ hr {{
 [data-baseweb="select"] > div,
 .stTextInput input,
 .stNumberInput input {{
+    background-color: {PL_SURFACE} !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 10px !important;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -140,12 +145,12 @@ hr {{
 [data-baseweb="select"]:focus-within > div,
 .stTextInput input:focus,
 .stNumberInput input:focus {{
-    border-color: rgba(233, 0, 82, 0.6) !important;
-    box-shadow: 0 0 0 3px rgba(233, 0, 82, 0.15) !important;
+    border-color: rgba(255, 40, 130, 0.6) !important;
+    box-shadow: 0 0 0 3px rgba(255, 40, 130, 0.15) !important;
 }}
 
 [data-testid="stMetric"] {{
-    background: rgba(255, 255, 255, 0.04);
+    background: {PL_SURFACE};
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 14px;
     padding: 0.85rem 1rem;
@@ -154,16 +159,15 @@ hr {{
 
 [data-testid="stMetric"]:hover {{
     transform: translateY(-2px);
-    border-color: rgba(233, 0, 82, 0.35);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 40, 130, 0.3);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }}
 
 [data-testid="stMetricValue"] {{
-    font-family: 'Barlow Condensed', sans-serif;
-    color: {PL_GREEN};
+    font-family: 'Inter', sans-serif;
+    color: white;
     font-weight: 800;
-    font-size: 1.6rem !important;
-    text-shadow: 0 0 18px rgba(0, 255, 133, 0.25);
+    font-size: 1.5rem !important;
 }}
 
 [data-testid="stMetricValue"] > div {{
@@ -176,13 +180,13 @@ hr {{
 
 [data-testid="stMetricLabel"] {{
     font-family: 'Inter', sans-serif;
-    text-transform: uppercase;
-    font-size: 0.72rem;
-    letter-spacing: 0.05em;
-    opacity: 0.8;
+    font-size: 0.75rem;
+    font-weight: 500;
+    opacity: 0.65;
 }}
 
 [data-testid="stExpander"] {{
+    background: {PL_SURFACE};
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
 }}
