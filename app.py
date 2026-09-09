@@ -400,12 +400,60 @@ hr {{
     --gdg-font-family: 'Inter', sans-serif;
 }}
 
-/* Success/info/warning callouts: a subtle left accent instead of a flat
-   tinted block on all four sides. */
+/* Native st.info/success/warning/error alerts get the same card language
+   as the stat/chip cards above (dark gradient surface, thin gradient cap)
+   instead of Streamlit's saturated default blue/green/red/yellow blocks,
+   which otherwise clash with the purple-and-pink page around them. Only
+   the accent color still signals which kind of alert it is — the card
+   shape and surface are identical everywhere, on every tab. */
 [data-testid="stAlertContainer"] {{
-    border-radius: 10px;
-    border-left-width: 3px !important;
-    border-left-style: solid !important;
+    position: relative;
+    background: linear-gradient(160deg, {PL_SURFACE_HI} 0%, {PL_SURFACE} 65%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-left: none !important;
+    border-radius: 14px !important;
+    padding: 0.95rem 1.1rem !important;
+}}
+
+[data-testid="stAlertContainer"]::before {{
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 14px 14px 0 0;
+    background: linear-gradient(90deg, {PL_PINK}, {PL_PURPLE});
+}}
+
+[data-testid="stAlertContainer"] p,
+[data-testid="stAlertContainer"] strong {{
+    color: #F5F2F5 !important;
+}}
+
+/* Success reuses the same pink highlight as a "recommended" chip card —
+   good news gets the same visual weight as a recommended chip play. */
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"]) {{
+    background: linear-gradient(160deg, rgba(255, 40, 130, 0.3) 0%, {PL_SURFACE} 75%) !important;
+    border-color: rgba(255, 40, 130, 0.55) !important;
+}}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentSuccess"])::before {{
+    background: {PL_PINK};
+    box-shadow: 0 0 12px rgba(255, 40, 130, 0.7);
+}}
+
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"]) {{
+    border-color: rgba(255, 176, 32, 0.4) !important;
+}}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentWarning"])::before {{
+    background: linear-gradient(90deg, #FFB020, {PL_PURPLE});
+}}
+
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"]) {{
+    border-color: rgba(255, 77, 77, 0.45) !important;
+}}
+[data-testid="stAlertContainer"]:has([data-testid="stAlertContentError"])::before {{
+    background: linear-gradient(90deg, #FF4D4D, {PL_PURPLE});
 }}
 
 /* Wider than the phone breakpoint below: covers the awkward zone where
@@ -779,7 +827,10 @@ def render_fixtures_tab(bootstrap, fixtures_data, fx_error):
         fixtures_data, teams_df, int(start_gw), int(num_gws)
     )
     st.dataframe(fx.style_ticker(display_df, difficulty_df), use_container_width=True)
-    st.caption("Lower FDR (green) = easier fixture. Color scale: 1 easiest → 5 hardest.")
+    st.caption(
+        "Green fixtures are easier, red fixtures are tougher — the difficulty rating "
+        "runs from 1 (easiest) to 5 (hardest)."
+    )
 
     st.markdown(f"#### Best & Worst Runs (GW{int(start_gw)}–GW{int(start_gw) + int(num_gws) - 1})")
     c1, c2 = st.columns(2, vertical_alignment="center")
@@ -986,19 +1037,20 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "Overall points",
         entry.get("summary_overall_points"),
         delta=gw_info.get("points"),
-        help="Change = points scored this gameweek.",
+        help="How many points you scored this gameweek.",
     )
     m2.metric(
         "Overall rank",
         f"{entry.get('summary_overall_rank'):,}" if entry.get("summary_overall_rank") else "—",
         delta=f"{deltas['overall_rank_delta']:,}" if deltas else None,
-        help="Change vs the previous gameweek (positive = moved up).",
+        help="How your overall rank moved since the previous gameweek — a positive "
+        "number means you climbed the rankings.",
     )
     m3.metric(
         f"GW{current_event} points",
         gw_info.get("points"),
         delta=deltas["points_delta"] if deltas else None,
-        help="Change vs the previous gameweek's points.",
+        help="How many more or fewer points you scored compared to the previous gameweek.",
     )
     m4.metric(
         "Bank",
@@ -1006,13 +1058,13 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         # The sign has to be the very first character or Streamlit's delta
         # color/arrow logic misreads it — "£-0.2m" reads as positive.
         delta=_signed_gbp(deltas["bank_delta"]) if deltas else None,
-        help="Change vs the previous gameweek.",
+        help="How much your bank balance has grown or shrunk since the previous gameweek.",
     )
     m5.metric(
         "Squad value",
         f"£{gw_info.get('value', 0) / 10:.1f}m",
         delta=_signed_gbp(deltas["value_delta"]) if deltas else None,
-        help="Change vs the previous gameweek.",
+        help="How much your squad's total value has grown or shrunk since the previous gameweek.",
     )
 
     free_transfers = team.estimate_free_transfers(history)
@@ -1169,22 +1221,19 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 with toggle_col1:
                     auto_maximize_transfers = st.toggle(
                         "Maximize potential score",
-                        help="Overrides the slider below — checks every transfer count "
-                        "from 0 up to 5, subtracts 4 points for each one beyond your free "
-                        "transfers, and uses whichever count gives the highest net "
-                        "expected score for this gameweek.",
+                        help="Overrides the slider below and automatically works out how "
+                        "many transfers — up to five — leave you with the highest expected "
+                        "score this gameweek, after accounting for the points lost to any "
+                        "hits beyond your free transfers.",
                     )
                 with toggle_col2:
                     maximize_budget_transfers = st.toggle(
                         "Maximize budget utilization",
-                        help="Among transfers that genuinely improve your expected score "
-                        "(never a downgrade), picks the most expensive affordable "
-                        "option your bank allows, using expected score to choose "
-                        "between similarly-priced options. The number of transfers "
-                        "kept is capped at whatever count actually raises your net "
-                        "expected score once -4 hits are subtracted, so the overall "
-                        "set is never worse than your current squad — full budget use, "
-                        "but only the highest score reachable that way.",
+                        help="Spends as much of your budget as it can without ever making "
+                        "your squad worse — among the transfers that genuinely improve "
+                        "your expected score, it favours the most expensive affordable "
+                        "option, and only keeps as many transfers as still leave you ahead "
+                        "once hit costs are subtracted.",
                     )
                 num_transfers_to_consider = st.slider(
                     "Number of transfers to consider",
@@ -1192,10 +1241,10 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     5,
                     0,
                     disabled=auto_maximize_transfers or maximize_budget_transfers,
-                    help="Finds up to this many transfers (same position, affordable, "
-                    "respects your estimated free-transfer count, applied together) that "
-                    "most improve this gameweek's expected score, then shows the "
-                    "resulting Ideal XI. 0 = just your current squad, no transfers.",
+                    help="Looks for up to this many transfers — same position, affordable, "
+                    "and counted against your estimated free transfers — that improve this "
+                    "gameweek's expected score the most, then shows the resulting Ideal XI. "
+                    "Leave it at zero to just see your current squad with no transfers.",
                 )
 
                 if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
@@ -1531,9 +1580,10 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
         form_weight = st.slider("Weight on recent form", 0.0, 1.0, 0.7, 0.1)
         budget_weight = st.slider("Weight on full budget utilization", 0.0, 1.0, 0.0, 0.1)
         st.caption(
-            "0 = spend only what buys extra score, leaving money unspent if it doesn't help. "
-            "Higher values increasingly reward using up the full budget, even trading a little "
-            "score for pricier players once cheaper ones score about the same."
+            "At zero, money is only spent when it buys extra score — anything left over "
+            "stays unspent. Turning this up increasingly rewards using your full budget, "
+            "even if it means trading a little score for pricier players once cheaper "
+            "ones score about the same."
         )
         fc1, fc2 = st.columns(2, vertical_alignment="center")
         with fc1:
@@ -1543,19 +1593,21 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
                 "Gameweeks to look ahead", min_value=1, max_value=8, value=5
             )
         st.caption(
-            f"0 = ignore fixtures entirely (score is season form/PPG only). Higher values "
-            f"increasingly favour players whose team has an easy run over the next "
-            f"{lookahead_gws} gameweek(s) starting GW{default_start_gw} — a double gameweek "
-            "boosts a player's score, a blank zeroes it out for that stretch."
+            f"At zero, fixtures are ignored entirely and scores come from season form and "
+            f"points-per-game alone. Turning this up increasingly favours players whose team "
+            f"has an easy run over the next {lookahead_gws} gameweek(s) starting "
+            f"GW{default_start_gw} — a double gameweek boosts a player's score, and a blank "
+            "wipes it out for that stretch."
         )
         last_season_weight = st.slider("Weight on last season's performance", 0.0, 1.0, 0.3, 0.1)
         st.caption(
-            "0 = ignore last season entirely. Higher values blend in each player's points-per-90 "
-            "from their last completed season — a stabilizer against thin in-season form/PPG "
-            "samples, especially early on. Promoted-team debutants, new-to-the-league signings, "
-            "and fringe players with too few minutes last season are left as-is (judged on this "
-            "season only, since there's no prior season to draw on). The first use fetches this "
-            "for every player (~10-15s, one-time); it's cached after that."
+            "At zero, last season is ignored entirely. Turning this up blends in each "
+            "player's points-per-90 from their last completed season, which helps steady "
+            "the ranking against thin in-season form and points-per-game samples, "
+            "especially early on. Promoted-team debutants, new signings, and players with "
+            "too few minutes last season are judged on this season only, since they have "
+            "no prior season to draw on. The first time this runs it fetches last-season "
+            "stats for every player (roughly 10-15 seconds), and stays cached after that."
         )
 
     def score_with_all_adjustments(players_df):
@@ -1601,11 +1653,11 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
 
     if maximize_clicked:
         st.caption(
-            "Overriding every slider above — full £100.0m budget, no formation lock, pure "
-            "score maximization (no budget-utilization bonus, so nothing trades away score "
-            "just to spend more), using the recommended weighting (form 0.7 / PPG 0.3, "
-            "fixtures 0.5 over the next 5 gameweeks, last season 0.3) since the score itself "
-            "still needs some weighting to be defined at all."
+            "Overriding every slider above — uses the full £100.0m budget with no "
+            "formation lock, and scores every player with a balanced default mix: mostly "
+            "recent form with points-per-game as a supporting signal, a meaningful boost "
+            "for good fixtures over the next 5 gameweeks, and a moderate allowance for "
+            "last season's form. Nothing trades away score just to spend more."
         )
         with st.spinner("Fetching last-season stats for all players (first time only)..."):
             prior_stats, _, _, _ = load_prior_season_stats(tuple(players["id"]))
