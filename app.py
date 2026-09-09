@@ -313,6 +313,24 @@ hr {{
     border-radius: 999px;
 }}
 
+/* A native-tooltip "?" affordance for the hand-built stat cards, echoing
+   st.metric's own help-icon treatment elsewhere on the page. */
+.pl-stat-help {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 0.35rem;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    font-size: 0.65rem;
+    font-weight: 700;
+    opacity: 0.6;
+    cursor: help;
+    vertical-align: middle;
+}}
+
 [data-testid="stExpander"] {{
     background: {PL_SURFACE};
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -918,10 +936,17 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
     # st.markdown treats 4+ leading spaces as a Markdown code block, so this
     # has to be built with no line-leading indentation or it renders as a
     # broken mix of raw HTML and literal code-block text.
+    free_transfers_help = (
+        "FPL does not expose free transfers remaining directly, so this is "
+        "a best-effort estimate from your transfer history, not guaranteed "
+        "accurate."
+    )
     stat_row_html = (
         '<div class="pl-stat-row">'
         '<div class="pl-stat-card">'
-        '<div class="pl-stat-label">Free transfers (estimated)</div>'
+        '<div class="pl-stat-label">Free transfers'
+        f'<span class="pl-stat-help" title="{free_transfers_help}">?</span>'
+        "</div>"
         f'<div class="pl-stat-value">{free_transfers}</div>'
         "</div>"
         f'<div class="{active_card_class}">'
@@ -954,7 +979,6 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "position": "Pos",
         "price": "£m",
         "gw_points": "Pts",
-        "multiplier": "x",
         "effective_points": "Total",
         "next_opp": "Next",
     }
