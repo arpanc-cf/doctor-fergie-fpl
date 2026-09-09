@@ -42,6 +42,33 @@ def estimate_free_transfers(history):
     return ft
 
 
+def gw_over_gw_deltas(history, event):
+    """Change in overall rank, points, bank, and squad value for `event`
+    versus the gameweek immediately before it in this manager's own
+    history — positionally, not necessarily event-1, since a manager who
+    joined mid-season has no earlier gameweeks to speak of and one who
+    skipped a gameweek (rare, but the API allows it) would otherwise be
+    compared against a neighbour that doesn't exist. Returns None if
+    `event` is the manager's first recorded gameweek (or isn't found at
+    all), since there's nothing to compare it against.
+
+    overall_rank_delta is sign-flipped (previous - current) so a positive
+    number always means "moved up" — a numerically lower rank is better,
+    the opposite of every other delta here.
+    """
+    current_list = sorted(history.get("current", []), key=lambda g: g["event"])
+    idx = next((i for i, g in enumerate(current_list) if g["event"] == event), None)
+    if idx is None or idx == 0:
+        return None
+    current, prev = current_list[idx], current_list[idx - 1]
+    return {
+        "overall_rank_delta": prev["overall_rank"] - current["overall_rank"],
+        "points_delta": current["points"] - prev["points"],
+        "bank_delta": (current["bank"] - prev["bank"]) / 10.0,
+        "value_delta": (current["value"] - prev["value"]) / 10.0,
+    }
+
+
 def build_season_history_df(history):
     df = pd.DataFrame(history.get("current", []))
     if df.empty:

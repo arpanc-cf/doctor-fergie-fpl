@@ -150,24 +150,40 @@ hr {{
 }}
 
 [data-testid="stMetric"] {{
-    background: {PL_SURFACE};
+    position: relative;
+    background: linear-gradient(160deg, {PL_SURFACE_HI} 0%, {PL_SURFACE} 65%);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 14px;
-    padding: 0.85rem 1rem;
+    padding: 0.95rem 1.1rem;
     transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }}
 
+/* A thin brand-gradient cap on every stat card — the "stand out" cue
+   that ties them together as a distinct row of headline numbers. Its own
+   rounded top corners (matching the card's) stand in for overflow:hidden
+   on the card, which would otherwise clip a label that wraps to 2 lines. */
+[data-testid="stMetric"]::before {{
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 14px 14px 0 0;
+    background: linear-gradient(90deg, {PL_PINK}, {PL_PURPLE});
+}}
+
 [data-testid="stMetric"]:hover {{
-    transform: translateY(-2px);
-    border-color: rgba(255, 40, 130, 0.3);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+    transform: translateY(-3px);
+    border-color: rgba(255, 40, 130, 0.4);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
 }}
 
 [data-testid="stMetricValue"] {{
     font-family: 'Inter', sans-serif;
     color: white;
     font-weight: 800;
-    font-size: 1.5rem !important;
+    font-size: 1.7rem !important;
 }}
 
 [data-testid="stMetricValue"] > div {{
@@ -181,8 +197,33 @@ hr {{
 [data-testid="stMetricLabel"] {{
     font-family: 'Inter', sans-serif;
     font-size: 0.75rem;
-    font-weight: 500;
-    opacity: 0.65;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+}}
+
+/* Streamlit's own metric label defaults to a single line with an
+   ellipsis — fine for a short label, but "Overall points" in a narrow
+   column (especially with a help-tooltip icon eating into it) just reads
+   as "Overall...". Let it wrap onto a second line instead of truncating. */
+[data-testid="stMetricLabel"] p,
+[data-testid="stMetricLabel"] [data-testid="stMarkdownContainer"],
+[data-testid="stMetricLabel"] > div {{
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+}}
+
+/* Delta reads as a small ticker chip rather than plain colored text. */
+[data-testid="stMetricDelta"] {{
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 0.82rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    width: fit-content;
+    margin-top: 0.15rem;
 }}
 
 [data-testid="stExpander"] {{
@@ -191,10 +232,15 @@ hr {{
     border-radius: 12px;
 }}
 
+/* The dataframe grid renders to <canvas>, which reads this custom
+   property for its own font rather than inheriting page CSS — without
+   it, table text quietly falls back to Streamlit's default ("Source
+   Sans"), out of step with the Inter used everywhere else. */
 [data-testid="stDataFrame"] {{
     border-radius: 10px;
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.06);
+    --gdg-font-family: 'Inter', sans-serif;
 }}
 
 /* Success/info/warning callouts: a subtle left accent instead of a flat
@@ -397,6 +443,16 @@ def format_status(row):
     if row["status"] == "d" and pd.notna(row["chance_of_playing_next_round"]):
         label = f"Doubtful ({int(row['chance_of_playing_next_round'])}%)"
     return label
+
+
+def _signed_gbp(value):
+    """Format a £m delta with the sign as the very first character (e.g.
+    "+£0.5m", "-£0.2m") — st.metric's delta color/arrow only reads the
+    sign correctly when it leads the string, not when a currency symbol
+    comes first.
+    """
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}£{abs(value):.1f}m"
 
 
 def render_last_updated(label, fetched_at, is_stale_fallback, error):
@@ -638,6 +694,7 @@ def render_season_chart(history_df):
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(t=40, b=40),
         height=380,
+        font=dict(family="Inter, sans-serif"),
     )
     return fig
 
@@ -727,15 +784,44 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         live = None
 
     gw_info = picks["entry_history"]
+    latest_deltas = team.gw_over_gw_deltas(history, current_event)
+    gw_deltas = team.gw_over_gw_deltas(history, gw)
 
     st.subheader(f"{entry.get('name', 'My team')} — {entry.get('player_first_name', '')} {entry.get('player_last_name', '')}")
 
     m1, m2, m3, m4, m5 = st.columns(5, vertical_alignment="center")
-    m1.metric("Overall points", entry.get("summary_overall_points"))
-    m2.metric("Overall rank", f"{entry.get('summary_overall_rank'):,}" if entry.get("summary_overall_rank") else "—")
-    m3.metric(f"GW{gw} points", gw_info.get("points"))
-    m4.metric("Bank", f"£{gw_info.get('bank', 0) / 10:.1f}m")
-    m5.metric("Squad value", f"£{gw_info.get('value', 0) / 10:.1f}m")
+    m1.metric(
+        "Overall points",
+        entry.get("summary_overall_points"),
+        delta=gw_info.get("points"),
+        help="Change = points scored this gameweek.",
+    )
+    m2.metric(
+        "Overall rank",
+        f"{entry.get('summary_overall_rank'):,}" if entry.get("summary_overall_rank") else "—",
+        delta=f"{latest_deltas['overall_rank_delta']:,}" if latest_deltas else None,
+        help="Change vs the previous gameweek (positive = moved up).",
+    )
+    m3.metric(
+        f"GW{gw} points",
+        gw_info.get("points"),
+        delta=gw_deltas["points_delta"] if gw_deltas else None,
+        help="Change vs the previous gameweek's points.",
+    )
+    m4.metric(
+        "Bank",
+        f"£{gw_info.get('bank', 0) / 10:.1f}m",
+        # The sign has to be the very first character or Streamlit's delta
+        # color/arrow logic misreads it — "£-0.2m" reads as positive.
+        delta=_signed_gbp(gw_deltas["bank_delta"]) if gw_deltas else None,
+        help="Change vs the previous gameweek.",
+    )
+    m5.metric(
+        "Squad value",
+        f"£{gw_info.get('value', 0) / 10:.1f}m",
+        delta=_signed_gbp(gw_deltas["value_delta"]) if gw_deltas else None,
+        help="Change vs the previous gameweek.",
+    )
 
     free_transfers = team.estimate_free_transfers(history)
     active_chip = picks.get("active_chip")
