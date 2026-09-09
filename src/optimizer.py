@@ -20,6 +20,9 @@ MAX_PER_CLUB = 3
 BENCH_WEIGHT = 0.02  # keeps bench selection meaningful without competing with the XI
 UNAVAILABLE_STATUSES = {"i", "s", "u"}  # injured, suspended, unavailable/left club
 SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, at budget_weight=1
+# Large enough that, at budget_weight=1, price alone decides between any two
+# genuinely score-improving transfer candidates in suggest_transfers.
+TRANSFER_BUDGET_DOMINANCE = 1000
 STARTING_CHANCE_THRESHOLD = 75  # below this % chance of playing, prefer a safer alternative over raw score
 
 # FPL's own points-per-event values, used to convert underlying process
@@ -385,12 +388,14 @@ def suggest_transfers(
     such players out of the incoming "in" pool, since you wouldn't want to
     buy one.
 
-    budget_weight (0-1) breaks ties among genuinely score-improving swaps
-    (gain > 0) in favor of spending more of the bank — mirroring
-    optimize_squad's own budget_weight, including its "can trade a little
-    score for a pricier player once cheaper ones score about the same"
-    behavior. It never turns a non-improving swap (gain <= 0) into a
-    suggestion; it only chooses among the improving ones.
+    budget_weight (0-1) shifts candidate selection toward spending more of
+    the bank. At 1 (full weight) it picks outright the most expensive
+    affordable option among genuinely score-improving swaps (gain > 0) —
+    i.e. "get the priciest player(s) the budget allows" — rather than a
+    small nudge; values between 0 and 1 blend toward that. It never turns
+    a non-improving swap (gain <= 0) into a suggestion; it only chooses
+    among the improving ones, so a higher weight can still yield a
+    cheaper pick if that's the only one that actually helps.
 
     This is a greedy heuristic, not a global optimum over combinations of
     simultaneous transfers — good enough for "which single swaps help most"
@@ -437,7 +442,10 @@ def suggest_transfers(
                 if gain <= 0:
                     continue
                 price_delta = in_row["price"] - sell_price
-                spend_bonus = budget_weight * SPEND_BONUS_SCALE * (price_delta / 100.0)
+                # At budget_weight=1, in_row["price"] * TRANSFER_BUDGET_DOMINANCE
+                # dwarfs any realistic score gain, so the priciest affordable,
+                # still-improving option always wins outright.
+                spend_bonus = budget_weight * in_row["price"] * TRANSFER_BUDGET_DOMINANCE
                 adjusted_gain = gain + spend_bonus
                 if best is None or adjusted_gain > best["adjusted_gain"]:
                     best = {
