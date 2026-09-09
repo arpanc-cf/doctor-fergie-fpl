@@ -867,7 +867,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     0,
                     5,
                     0,
-                    disabled=auto_maximize_transfers,
+                    disabled=auto_maximize_transfers or maximize_budget_transfers,
                     help="Finds up to this many transfers (same position, affordable, "
                     "respects your estimated free-transfer count, applied together) that "
                     "most improve this gameweek's expected score, then shows the "
@@ -912,11 +912,11 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                                 if net is not None and net > best_net:
                                     best_k, best_net = k, net
                             num_to_use = best_k
-                        elif maximize_budget_transfers and num_transfers_to_consider == 0:
-                            # Budget-max alone has no count of its own — "spend the
-                            # budget" naturally means "as many budget-maximizing
-                            # transfers as it can find," not 0. The slider still
-                            # wins if the manager has explicitly raised it.
+                        elif maximize_budget_transfers:
+                            # Budget-max alone has no count of its own (the slider is
+                            # disabled while it's on) — "spend the budget" naturally
+                            # means "as many budget-maximizing transfers as it can
+                            # find," not whatever the slider was last set to.
                             num_to_use = len(all_suggestions)
                         else:
                             num_to_use = num_transfers_to_consider
