@@ -793,7 +793,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
                 )
 
-                if auto_maximize_transfers or num_transfers_to_consider > 0:
+                if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
                     with st.spinner("Scanning every player for the best transfers..."):
                         bank = current_picks["entry_history"].get("bank", 0) / 10.0
                         ranked_all = recommend.recommend_captain(
@@ -831,6 +831,12 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                                 if net is not None and net > best_net:
                                     best_k, best_net = k, net
                             num_to_use = best_k
+                        elif maximize_budget_transfers and num_transfers_to_consider == 0:
+                            # Budget-max alone has no count of its own — "spend the
+                            # budget" naturally means "as many budget-maximizing
+                            # transfers as it can find," not 0. The slider still
+                            # wins if the manager has explicitly raised it.
+                            num_to_use = len(all_suggestions)
                         else:
                             num_to_use = num_transfers_to_consider
 
@@ -842,6 +848,11 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                                 "No transfer beats your current squad once hit costs are "
                                 "subtracted — 0 transfers is your net-best option, so the "
                                 "Ideal XI above already reflects it."
+                            )
+                        elif maximize_budget_transfers:
+                            st.info(
+                                "No affordable replacement was found for any position — "
+                                "there's nothing to spend the bank on right now."
                             )
                         else:
                             st.info(

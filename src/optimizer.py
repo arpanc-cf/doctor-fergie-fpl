@@ -413,6 +413,15 @@ def suggest_transfers(
     by_id = df.set_index("id")
     squad_ids = list(current_ids)
     remaining_bank = bank
+    # Without a gain > 0 requirement (budget-maximizing mode), nothing else
+    # stops the greedy search from undoing its own earlier moves within the
+    # same call — selling a player one step and buying them straight back
+    # the next (each swap frees up exactly the cash the other one spent), or
+    # buying a player one step and selling them again a step later. Once
+    # sold, a player is never offered as an "in" again; once bought, they're
+    # never offered as an "out" again — both within this same call.
+    previously_sold_ids = set()
+    newly_bought_ids = set()
 
     suggestions = []
     for n in range(num_transfers):
@@ -425,7 +434,7 @@ def suggest_transfers(
                 ) + 1
 
         for out_id in squad_ids:
-            if out_id not in by_id.index:
+            if out_id not in by_id.index or out_id in newly_bought_ids:
                 continue
             out_row = by_id.loc[out_id]
             sell_price = out_row["price"]
@@ -436,6 +445,7 @@ def suggest_transfers(
                 (buy_pool["position"] == out_row["position"])
                 & (buy_pool["price"] <= budget_for_buy)
                 & (~buy_pool["id"].isin(squad_ids))
+                & (~buy_pool["id"].isin(previously_sold_ids))
             ]
             for _, in_row in candidates.iterrows():
                 if in_row["team_name"] == out_row["team_name"]:
@@ -471,6 +481,8 @@ def suggest_transfers(
         if best is None:
             break
 
+        previously_sold_ids.add(best["out_id"])
+        newly_bought_ids.add(best["in"]["id"])
         squad_ids = [best["in"]["id"] if pid == best["out_id"] else pid for pid in squad_ids]
         remaining_bank -= best["cost_delta"]
         is_hit = n >= free_transfers
