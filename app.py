@@ -694,36 +694,6 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
-    toggle_col1, toggle_col2 = st.columns(2)
-    with toggle_col1:
-        auto_maximize_transfers = st.toggle(
-            "Maximize potential score",
-            help="Overrides the slider below — checks every transfer count from 0 up to 5, "
-            "subtracts 4 points for each one beyond your free transfers, and uses whichever "
-            "count gives the highest net expected score for this gameweek.",
-        )
-    with toggle_col2:
-        maximize_budget_transfers = st.toggle(
-            "Maximize budget utilization",
-            help="Picks the most expensive affordable player(s) your bank allows, using "
-            "expected score to choose between similarly-priced options — spend the "
-            "budget fully, on the best players it can buy. On its own this can pick a "
-            "pricier player even if it doesn't improve your score; combine with "
-            "'Maximize potential score' so the count of transfers kept is still capped "
-            "at whatever number actually raises your net expected score — full budget "
-            "use, but only the highest score reachable that way.",
-        )
-    num_transfers_to_consider = st.slider(
-        "Number of transfers to consider",
-        0,
-        5,
-        0,
-        disabled=auto_maximize_transfers,
-        help="Finds up to this many transfers (same position, affordable, respects your "
-        "estimated free-transfer count, applied together) that most improve this "
-        "gameweek's expected score, then shows the resulting Ideal XI. 0 = just your "
-        "current squad, no transfers.",
-    )
     if fixtures_data is None:
         st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
     else:
@@ -791,6 +761,45 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     use_container_width=True,
                     hide_index=True,
                     column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                )
+
+                st.markdown("#### Transfer Matrix")
+                st.caption(
+                    "Suggest transfers against your actual squad and see the resulting "
+                    "Ideal XI for next gameweek. Nothing below runs until you turn on a "
+                    "toggle or move the slider."
+                )
+                toggle_col1, toggle_col2 = st.columns(2)
+                with toggle_col1:
+                    auto_maximize_transfers = st.toggle(
+                        "Maximize potential score",
+                        help="Overrides the slider below — checks every transfer count "
+                        "from 0 up to 5, subtracts 4 points for each one beyond your free "
+                        "transfers, and uses whichever count gives the highest net "
+                        "expected score for this gameweek.",
+                    )
+                with toggle_col2:
+                    maximize_budget_transfers = st.toggle(
+                        "Maximize budget utilization",
+                        help="Picks the most expensive affordable player(s) your bank "
+                        "allows, using expected score to choose between similarly-priced "
+                        "options — spend the budget fully, on the best players it can "
+                        "buy. On its own this can pick a pricier player even if it "
+                        "doesn't improve your score; combine with 'Maximize potential "
+                        "score' so the count of transfers kept is still capped at "
+                        "whatever number actually raises your net expected score — full "
+                        "budget use, but only the highest score reachable that way.",
+                    )
+                num_transfers_to_consider = st.slider(
+                    "Number of transfers to consider",
+                    0,
+                    5,
+                    0,
+                    disabled=auto_maximize_transfers,
+                    help="Finds up to this many transfers (same position, affordable, "
+                    "respects your estimated free-transfer count, applied together) that "
+                    "most improve this gameweek's expected score, then shows the "
+                    "resulting Ideal XI. 0 = just your current squad, no transfers.",
                 )
 
                 if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
