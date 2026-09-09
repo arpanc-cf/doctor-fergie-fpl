@@ -882,7 +882,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             )
                             nm3.metric(
                                 "Transfer-hit cost",
-                                f"-{total_hits}",
+                                f"{-total_hits}",
                                 help="Points lost to -4 hits on transfers beyond your free "
                                 "transfers, not yet subtracted from the expected score above.",
                             )
