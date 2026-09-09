@@ -853,14 +853,14 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 with toggle_col2:
                     maximize_budget_transfers = st.toggle(
                         "Maximize budget utilization",
-                        help="Picks the most expensive affordable player(s) your bank "
-                        "allows, using expected score to choose between similarly-priced "
-                        "options — spend the budget fully, on the best players it can "
-                        "buy. On its own this can pick a pricier player even if it "
-                        "doesn't improve your score; combine with 'Maximize potential "
-                        "score' so the count of transfers kept is still capped at "
-                        "whatever number actually raises your net expected score — full "
-                        "budget use, but only the highest score reachable that way.",
+                        help="Among transfers that genuinely improve your expected score "
+                        "(never a downgrade), picks the most expensive affordable "
+                        "option your bank allows, using expected score to choose "
+                        "between similarly-priced options. The number of transfers "
+                        "kept is capped at whatever count actually raises your net "
+                        "expected score once -4 hits are subtracted, so the overall "
+                        "set is never worse than your current squad — full budget use, "
+                        "but only the highest score reachable that way.",
                     )
                 num_transfers_to_consider = st.slider(
                     "Number of transfers to consider",
@@ -905,35 +905,30 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             hits = sum(4 for t in all_suggestions[:k] if t["is_hit"])
                             return hypo_starters["expected_score"].sum() - hits
 
-                        if auto_maximize_transfers:
+                        if auto_maximize_transfers or maximize_budget_transfers:
+                            # Both toggles cap the count via net expected score (score
+                            # after subtracting -4 hits) — even individually-improving
+                            # transfers can net negative once hit costs stack up, and
+                            # neither toggle should ever leave you worse off than your
+                            # current squad. The slider is disabled while either is on,
+                            # so there's no separate manual count to fall back to.
                             best_k, best_net = 0, ideal_starters["expected_score"].sum()
                             for k in range(1, len(all_suggestions) + 1):
                                 net = _net_expected_score(k)
                                 if net is not None and net > best_net:
                                     best_k, best_net = k, net
                             num_to_use = best_k
-                        elif maximize_budget_transfers:
-                            # Budget-max alone has no count of its own (the slider is
-                            # disabled while it's on) — "spend the budget" naturally
-                            # means "as many budget-maximizing transfers as it can
-                            # find," not whatever the slider was last set to.
-                            num_to_use = len(all_suggestions)
                         else:
                             num_to_use = num_transfers_to_consider
 
                     transfer_suggestions = all_suggestions[:num_to_use]
 
                     if num_to_use == 0:
-                        if auto_maximize_transfers:
+                        if auto_maximize_transfers or maximize_budget_transfers:
                             st.info(
                                 "No transfer beats your current squad once hit costs are "
                                 "subtracted — 0 transfers is your net-best option, so the "
                                 "Ideal XI above already reflects it."
-                            )
-                        elif maximize_budget_transfers:
-                            st.info(
-                                "No affordable replacement was found for any position — "
-                                "there's nothing to spend the bank on right now."
                             )
                         else:
                             st.info(
@@ -951,15 +946,12 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             )
                         if maximize_budget_transfers:
                             st.caption(
-                                "Maximize budget utilization is on — these pick the most "
-                                "expensive affordable player(s), using expected score to "
-                                "choose between similarly-priced options."
-                                + (
-                                    " Capped to the count that maximizes net expected score, "
-                                    "since 'Maximize potential score' is also on."
-                                    if auto_maximize_transfers
-                                    else ""
-                                )
+                                "Maximize budget utilization is on — among transfers that "
+                                "genuinely improve your score, these pick the most "
+                                "expensive affordable option, using expected score to "
+                                "choose between similarly-priced options. Capped to the "
+                                "count that maximizes net expected score, hit costs "
+                                "included."
                             )
                         for i, t in enumerate(transfer_suggestions, start=1):
                             hit_label = " (-4 hit)" if t["is_hit"] else " (free)"

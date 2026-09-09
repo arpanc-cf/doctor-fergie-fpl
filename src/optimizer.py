@@ -388,20 +388,20 @@ def suggest_transfers(
     such players out of the incoming "in" pool, since you wouldn't want to
     buy one.
 
-    budget_weight (0-1) changes what "best" means for candidate selection.
-    At 0 (default), only genuinely score-improving swaps (gain > 0) are
-    ever considered, and the highest-gain one wins — pure score
-    maximization. At 1 (full weight, "maximize budget utilization"), the
-    goal flips to spending as much of the bank as possible: any affordable
-    candidate is eligible (not just improving ones), and price dominates
-    the comparison, so the most expensive affordable option always wins,
-    with score only breaking ties among similarly-priced candidates —
-    "the best-scoring way to spend the budget," not "only ever improve,
-    then spend." Combined with a transfer-count search that maximizes net
-    score (see the "Maximize potential score" caller-side option), this
-    naturally converges on the highest score reachable while pushing
-    toward full budget use, since a spend that doesn't help is simply not
-    kept by that outer count search.
+    Every candidate considered must genuinely improve score (gain > 0) —
+    this never suggests a downgrade, regardless of budget_weight.
+
+    budget_weight (0-1) changes which improving swap "best" means among
+    those that pass the gain > 0 gate. At 0 (default), the highest-gain
+    one wins — pure score maximization. At 1 (full weight, "maximize
+    budget utilization"), price dominates the comparison instead, so the
+    most expensive still-improving option wins, with score only breaking
+    ties among similarly-priced candidates. Paired with a transfer-count
+    search that maximizes net score (see the "Maximize potential score"
+    caller-side option — worth using here too, since a set of individually
+    improving transfers can still net negative once -4 hits are counted),
+    this converges on the highest score reachable while leaning toward
+    full budget use.
 
     This is a greedy heuristic, not a global optimum over combinations of
     simultaneous transfers — good enough for "which single swaps help most"
@@ -413,11 +413,12 @@ def suggest_transfers(
     by_id = df.set_index("id")
     squad_ids = list(current_ids)
     remaining_bank = bank
-    # Without a gain > 0 requirement (budget-maximizing mode), nothing else
-    # stops the greedy search from undoing its own earlier moves within the
-    # same call — selling a player one step and buying them straight back
-    # the next (each swap frees up exactly the cash the other one spent), or
-    # buying a player one step and selling them again a step later. Once
+    # Belt-and-braces against undoing its own earlier moves within the same
+    # call — selling a player one step and buying them straight back the
+    # next, or buying a player one step and selling them again a step
+    # later. The gain > 0 gate makes an exact reversal impossible on its
+    # own (its gain is the negative of the original swap's), but this
+    # still guards against near-ties across differently-scored pairs. Once
     # sold, a player is never offered as an "in" again; once bought, they're
     # never offered as an "out" again — both within this same call.
     previously_sold_ids = set()
@@ -455,17 +456,14 @@ def suggest_transfers(
                 if club_after > MAX_PER_CLUB:
                     continue
                 gain = in_row["score"] - out_row["score"]
-                if budget_weight <= 0 and gain <= 0:
+                if gain <= 0:
                     continue
                 price_delta = in_row["price"] - sell_price
                 # At budget_weight=1, in_row["price"] * TRANSFER_BUDGET_DOMINANCE
-                # dwarfs any realistic score gain, so the priciest affordable
-                # option always wins outright, with gain only breaking ties
-                # between equally (or near-equally) priced candidates — this
-                # is "spend the budget, picking the best score you can get for
-                # it" rather than "only ever improve, then spend." At
-                # budget_weight=0 the gain > 0 gate still applies, so pure
-                # score-maximizing mode never suggests a downgrade.
+                # dwarfs any realistic score gain, so among the still-improving
+                # candidates (gain > 0, enforced above regardless of
+                # budget_weight) the priciest one always wins outright, with
+                # gain only breaking ties between similarly-priced candidates.
                 spend_bonus = budget_weight * in_row["price"] * TRANSFER_BUDGET_DOMINANCE
                 adjusted_gain = gain + spend_bonus
                 if best is None or adjusted_gain > best["adjusted_gain"]:
