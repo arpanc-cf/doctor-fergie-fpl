@@ -1322,14 +1322,14 @@ if fixtures is not None:
 
 players = build_player_table(bootstrap)
 
-tab_players, tab_fixtures, tab_my_team, tab_optimizer = st.tabs(
-    ["Players", "Fixtures", "My Team", "Optimizer"]
+tab_team_builder, tab_season_overview, tab_player_base, tab_optimizer_draft = st.tabs(
+    ["Team Builder", "Season Overview", "PlayerBase", "Optimizer Draft"]
 )
-with tab_players:
-    render_players_tab(bootstrap, fixtures, fx_error, manual_refresh)
-with tab_fixtures:
-    render_fixtures_tab(bootstrap, fixtures, fx_error)
-with tab_my_team:
+with tab_team_builder:
     render_my_team_tab(bootstrap, players, fixtures, force_refresh)
-with tab_optimizer:
+with tab_season_overview:
+    render_fixtures_tab(bootstrap, fixtures, fx_error)
+with tab_player_base:
+    render_players_tab(bootstrap, fixtures, fx_error, manual_refresh)
+with tab_optimizer_draft:
     render_optimizer_tab(bootstrap, players, fixtures, force_refresh)
