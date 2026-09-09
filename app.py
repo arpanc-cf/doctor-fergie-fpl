@@ -694,12 +694,23 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         "double counts both fixtures). Not a transfer suggestion, just the best way to "
         "line up what you already own."
     )
-    auto_maximize_transfers = st.checkbox(
-        "Auto-maximize (find the best number of transfers, hit costs included)",
-        help="Overrides the slider below — checks every transfer count from 0 up to 5, "
-        "subtracts 4 points for each one beyond your free transfers, and uses whichever "
-        "count gives the highest net expected score for this gameweek.",
-    )
+    toggle_col1, toggle_col2 = st.columns(2)
+    with toggle_col1:
+        auto_maximize_transfers = st.toggle(
+            "Maximize potential score",
+            help="Overrides the slider below — checks every transfer count from 0 up to 5, "
+            "subtracts 4 points for each one beyond your free transfers, and uses whichever "
+            "count gives the highest net expected score for this gameweek.",
+        )
+    with toggle_col2:
+        maximize_budget_transfers = st.toggle(
+            "Maximize budget utilization",
+            help="Among transfers that genuinely improve your expected score, leans toward "
+            "the pricier option when it's close — spending more of your bank rather than "
+            "leaving it unused — without ever picking a transfer that lowers your score. "
+            "Combine with 'Maximize potential score' to also auto-pick the best transfer "
+            "count; use it alone to keep the slider's manual count.",
+        )
     num_transfers_to_consider = st.slider(
         "Number of transfers to consider",
         0,
@@ -793,6 +804,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             bank=bank,
                             num_transfers=5,
                             free_transfers=free_transfers,
+                            budget_weight=1.0 if maximize_budget_transfers else 0.0,
                         )
 
                         def _apply_transfers(k):
@@ -839,9 +851,14 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                         st.markdown(f"##### Ideal XI with {num_to_use} suggested transfer(s)")
                         if auto_maximize_transfers:
                             st.caption(
-                                f"Auto-maximize picked {num_to_use} transfer(s) — the highest "
-                                "net expected score across every count from 0 to 5, hit costs "
-                                "included."
+                                f"Maximize potential score picked {num_to_use} transfer(s) — "
+                                "the highest net expected score across every count from 0 to "
+                                "5, hit costs included."
+                            )
+                        if maximize_budget_transfers:
+                            st.caption(
+                                "Maximize budget utilization is on — among score-improving "
+                                "options, these lean toward spending more of your bank."
                             )
                         for i, t in enumerate(transfer_suggestions, start=1):
                             hit_label = " (-4 hit)" if t["is_hit"] else " (free)"

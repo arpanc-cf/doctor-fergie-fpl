@@ -364,7 +364,15 @@ def best_starting_xi(squad_df, score_col="score"):
     return starting_ids, bench_ids, best["formation"]
 
 
-def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfers, exclude_unavailable=True):
+def suggest_transfers(
+    current_ids,
+    players_df,
+    bank,
+    num_transfers,
+    free_transfers,
+    exclude_unavailable=True,
+    budget_weight=0.0,
+):
     """Greedily suggest up to num_transfers single swaps (same position,
     affordable, club-limit respected) that maximize score gain one at a
     time. Transfers beyond free_transfers are flagged as -4 point hits.
@@ -376,6 +384,13 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
     whenever a better replacement exists. exclude_unavailable only keeps
     such players out of the incoming "in" pool, since you wouldn't want to
     buy one.
+
+    budget_weight (0-1) breaks ties among genuinely score-improving swaps
+    (gain > 0) in favor of spending more of the bank — mirroring
+    optimize_squad's own budget_weight, including its "can trade a little
+    score for a pricier player once cheaper ones score about the same"
+    behavior. It never turns a non-improving swap (gain <= 0) into a
+    suggestion; it only chooses among the improving ones.
 
     This is a greedy heuristic, not a global optimum over combinations of
     simultaneous transfers — good enough for "which single swaps help most"
@@ -419,16 +434,22 @@ def suggest_transfers(current_ids, players_df, bank, num_transfers, free_transfe
                 if club_after > MAX_PER_CLUB:
                     continue
                 gain = in_row["score"] - out_row["score"]
-                if best is None or gain > best["gain"]:
+                if gain <= 0:
+                    continue
+                price_delta = in_row["price"] - sell_price
+                spend_bonus = budget_weight * SPEND_BONUS_SCALE * (price_delta / 100.0)
+                adjusted_gain = gain + spend_bonus
+                if best is None or adjusted_gain > best["adjusted_gain"]:
                     best = {
                         "out_id": out_id,
                         "out": out_row,
                         "in": in_row,
                         "gain": gain,
-                        "cost_delta": in_row["price"] - sell_price,
+                        "adjusted_gain": adjusted_gain,
+                        "cost_delta": price_delta,
                     }
 
-        if best is None or best["gain"] <= 0:
+        if best is None:
             break
 
         squad_ids = [best["in"]["id"] if pid == best["out_id"] else pid for pid in squad_ids]
