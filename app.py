@@ -26,17 +26,28 @@ html, body, [class*="css"] {{
     font-family: 'Inter', sans-serif;
 }}
 
+/* Subtle depth instead of a flat fill — two soft glows anchored at the
+   corners, low enough opacity to read as ambience, not decoration. */
+.stApp {{
+    background-color: #1A0B2E;
+    background-image:
+        radial-gradient(ellipse 900px 500px at 8% -10%, rgba(233, 0, 82, 0.10), transparent 60%),
+        radial-gradient(ellipse 900px 600px at 100% 15%, rgba(61, 25, 91, 0.55), transparent 55%);
+    background-attachment: fixed;
+}}
+
 .block-container {{
-    padding-top: 2rem;
+    padding-top: 1.75rem;
     max-width: 1400px;
 }}
 
 .pl-gradient-bar {{
-    height: 6px;
+    height: 3px;
     width: 100%;
-    margin-bottom: 1.25rem;
+    margin-bottom: 1.5rem;
     border-radius: 3px;
     background: linear-gradient(90deg, {PL_PURPLE}, {PL_PINK}, {PL_CYAN}, {PL_GREEN});
+    box-shadow: 0 0 16px rgba(233, 0, 82, 0.35);
 }}
 
 h1, h2, h3, h4 {{
@@ -51,9 +62,23 @@ h1 {{
     margin-bottom: 0 !important;
 }}
 
+h4 {{
+    padding-top: 0.4rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}}
+
+/* Give st.divider() the brand instead of a flat default gray hairline. */
+hr {{
+    border: none !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, rgba(233, 0, 82, 0.45), rgba(4, 245, 255, 0.12), transparent) !important;
+    margin: 1.1rem 0 !important;
+}}
+
 .stTabs [data-baseweb="tab-list"] {{
     gap: 0.5rem;
     flex-wrap: wrap;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }}
 
 .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
@@ -73,6 +98,10 @@ h1 {{
     background-color: rgba(233, 0, 82, 0.08);
 }}
 
+.stTabs [data-baseweb="tab-highlight"] {{
+    box-shadow: 0 0 8px rgba(233, 0, 82, 0.6);
+}}
+
 .stButton > button, .stDownloadButton > button {{
     font-family: 'Barlow Condensed', sans-serif;
     font-weight: 700;
@@ -83,23 +112,50 @@ h1 {{
     border: none;
     border-radius: 8px;
     padding: 0.55rem 1.25rem;
-    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(233, 0, 82, 0.25);
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
 }}
 
 .stButton > button:hover, .stDownloadButton > button:hover {{
     background-color: {PL_PURPLE};
     color: {PL_CYAN};
+    box-shadow: 0 4px 16px rgba(4, 245, 255, 0.2);
 }}
 
 .stButton > button:active {{
     transform: scale(0.98);
 }}
 
+/* Flat filled inputs get a hairline border and a soft focus ring, so they
+   read as distinct fields instead of solid blocks. */
+[data-baseweb="select"] > div,
+.stTextInput input,
+.stNumberInput input {{
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 10px !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}}
+
+[data-baseweb="select"]:focus-within > div,
+.stTextInput input:focus,
+.stNumberInput input:focus {{
+    border-color: rgba(233, 0, 82, 0.6) !important;
+    box-shadow: 0 0 0 3px rgba(233, 0, 82, 0.15) !important;
+}}
+
 [data-testid="stMetric"] {{
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 0.85rem 1rem;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}}
+
+[data-testid="stMetric"]:hover {{
+    transform: translateY(-2px);
+    border-color: rgba(233, 0, 82, 0.35);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }}
 
 [data-testid="stMetricValue"] {{
@@ -107,6 +163,7 @@ h1 {{
     color: {PL_GREEN};
     font-weight: 800;
     font-size: 1.6rem !important;
+    text-shadow: 0 0 18px rgba(0, 255, 133, 0.25);
 }}
 
 [data-testid="stMetricValue"] > div {{
@@ -133,6 +190,24 @@ h1 {{
 [data-testid="stDataFrame"] {{
     border-radius: 10px;
     overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}}
+
+/* Success/info/warning callouts: a subtle left accent instead of a flat
+   tinted block on all four sides. */
+[data-testid="stAlertContainer"] {{
+    border-radius: 10px;
+    border-left-width: 3px !important;
+    border-left-style: solid !important;
+}}
+
+/* Wider than the phone breakpoint below: covers the awkward zone where
+   Streamlit keeps title/action columns side by side but the action
+   column is too narrow for its label not to wrap mid-word. */
+@media (max-width: 780px) {{
+    .stButton > button, .stDownloadButton > button {{
+        width: 100%;
+    }}
 }}
 
 @media (max-width: 640px) {{
@@ -146,9 +221,6 @@ h1 {{
     }}
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
         font-size: 0.9rem;
-    }}
-    .stButton > button, .stDownloadButton > button {{
-        width: 100%;
     }}
 }}
 
@@ -1229,7 +1301,7 @@ if "did_initial_refresh" not in st.session_state:
 else:
     auto_refresh = False
 
-title_col, refresh_col = st.columns([5, 1], vertical_alignment="center")
+title_col, refresh_col = st.columns([3, 1], vertical_alignment="center")
 with title_col:
     st.title("Doctor Fergie")
 with refresh_col:
