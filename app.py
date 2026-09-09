@@ -223,8 +223,27 @@ hr {{
     h1 {{
         font-size: 2.1rem !important;
     }}
+    /* At phone widths the four tab labels no longer fit on one row.
+       flex-wrap would push the overflow tab onto a second row, which
+       throws off BaseWeb's absolutely-positioned active-tab underline
+       (it ends up under the wrong row). A single scrollable row keeps
+       the underline correct and is a more familiar mobile tab pattern
+       anyway — swipe to see the rest. */
+    .stTabs [data-baseweb="tab-list"] {{
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }}
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {{
+        display: none;
+    }}
+    .stTabs [data-baseweb="tab-list"] button {{
+        flex: 0 0 auto;
+    }}
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
         font-size: 0.9rem;
+        white-space: nowrap;
     }}
 }}
 
