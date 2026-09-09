@@ -448,6 +448,15 @@ def load_entry_picks(team_id, gw, force_refresh=False):
     )
 
 
+def load_entry_transfers(team_id, force_refresh=False):
+    return get_or_fetch(
+        f"entry-transfers:{team_id}",
+        lambda: fpl_api.fetch_entry_transfers(team_id),
+        max_age_seconds=CACHE_MAX_AGE_SECONDS,
+        force_refresh=force_refresh,
+    )
+
+
 def load_event_live(gw, force_refresh=False):
     return get_or_fetch(
         f"event-live:{gw}",
@@ -930,7 +939,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
 
     free_transfers = team.estimate_free_transfers(history)
     active_chip = picks.get("active_chip")
-    active_chip_label = chip_display_name(active_chip) or "None"
+    active_chip_label = f"Used ({chip_display_name(active_chip)})" if active_chip else "Not Used"
     active_card_class = "pl-stat-card pl-stat-card--active" if active_chip else "pl-stat-card"
     active_badge = '<div class="pl-stat-badge">● Active</div>' if active_chip else ""
     # st.markdown treats 4+ leading spaces as a Markdown code block, so this
@@ -996,379 +1005,408 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
         hide_index=True,
     )
 
-    st.markdown(f"#### Ideal XI for next gameweek (GW{next_gw})")
-    st.caption(
-        "Best starting XI from your actual 15-man squad for the upcoming gameweek — "
-        "form/PPG adjusted for that gameweek's specific fixture (a blank scores 0, a "
-        "double counts both fixtures). Not a transfer suggestion, just the best way to "
-        "line up what you already own."
-    )
-    if fixtures_data is None:
-        st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
-    else:
-        try:
-            current_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
-        except fpl_api.FPLAPIError as e:
-            st.error(f"Could not load your current squad: {e}")
-            current_picks = None
+    if gw == current_event:
+        st.markdown(f"#### Ideal XI for next gameweek (GW{next_gw})")
+        st.caption(
+            "Best starting XI from your actual 15-man squad for the upcoming gameweek — "
+            "form/PPG adjusted for that gameweek's specific fixture (a blank scores 0, a "
+            "double counts both fixtures). Not a transfer suggestion, just the best way to "
+            "line up what you already own."
+        )
+        if fixtures_data is None:
+            st.info("Fixtures unavailable this session — can't factor in fixture difficulty.")
+        else:
+            try:
+                current_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
+            except fpl_api.FPLAPIError as e:
+                st.error(f"Could not load your current squad: {e}")
+                current_picks = None
 
-        if current_picks is not None:
-            current_ids = [p["element"] for p in current_picks["picks"]]
-            ranked = recommend.recommend_captain(current_ids, players, fixtures_data, next_gw)
-            ranked["next_opp"] = ranked["team"].map(next_opp_by_team).fillna("—")
-            result = opt.best_starting_xi(ranked, score_col="expected_score") if not ranked.empty else None
-            if result is None:
-                st.info("Couldn't determine an ideal XI for the next gameweek.")
-            else:
-                ideal_starting_ids, ideal_bench_ids, ideal_formation = result
-                ideal_starters = ranked[ranked["id"].isin(ideal_starting_ids)].sort_values(
-                    "expected_score", ascending=False
-                )
-                ideal_bench = ranked[ranked["id"].isin(ideal_bench_ids)].sort_values(
-                    "expected_score", ascending=False
-                )
-
-                cap, vice = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
-                im1, im2 = st.columns(2, vertical_alignment="center")
-                im1.metric("Ideal formation", ideal_formation)
-                im2.metric("Expected score (XI)", f"{ideal_starters['expected_score'].sum():.1f}")
-                label = f"**Suggested captain: {cap['web_name']}**"
-                if vice is not None:
-                    label += f" · Vice: {vice['web_name']}"
-                st.markdown(label)
-
-                actual_starting_ids = {p["element"] for p in current_picks["picks"] if p["position"] <= 11}
-                bench_to_start = ideal_starting_ids - actual_starting_ids
-                start_to_bench = actual_starting_ids - ideal_starting_ids
-                if bench_to_start or start_to_bench:
-                    id_to_name = dict(zip(players["id"], players["web_name"]))
-                    start_names = ", ".join(id_to_name.get(i, "?") for i in bench_to_start)
-                    bench_names = ", ".join(id_to_name.get(i, "?") for i in start_to_bench)
-                    st.warning(
-                        f"Differs from your currently set lineup — consider starting "
-                        f"**{start_names}** instead of **{bench_names}**."
-                    )
+            if current_picks is not None:
+                current_ids = [p["element"] for p in current_picks["picks"]]
+                ranked = recommend.recommend_captain(current_ids, players, fixtures_data, next_gw)
+                ranked["next_opp"] = ranked["team"].map(next_opp_by_team).fillna("—")
+                result = opt.best_starting_xi(ranked, score_col="expected_score") if not ranked.empty else None
+                if result is None:
+                    st.info("Couldn't determine an ideal XI for the next gameweek.")
                 else:
-                    st.success("Your currently set lineup already matches this suggestion.")
-
-                ideal_display_cols = {
-                    "web_name": "Player",
-                    "team_name": "Team",
-                    "position": "Pos",
-                    "next_opp": "Next",
-                    "expected_score": "Expected",
-                }
-                st.dataframe(
-                    ideal_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
-                )
-                st.caption("Bench")
-                st.dataframe(
-                    ideal_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
-                )
-
-                st.markdown("#### Transfer Matrix")
-                st.caption(
-                    "Suggest transfers against your actual squad and see the resulting "
-                    "Ideal XI for next gameweek. Nothing below runs until you turn on a "
-                    "toggle or move the slider."
-                )
-                toggle_col1, toggle_col2 = st.columns(2)
-                with toggle_col1:
-                    auto_maximize_transfers = st.toggle(
-                        "Maximize potential score",
-                        help="Overrides the slider below — checks every transfer count "
-                        "from 0 up to 5, subtracts 4 points for each one beyond your free "
-                        "transfers, and uses whichever count gives the highest net "
-                        "expected score for this gameweek.",
+                    ideal_starting_ids, ideal_bench_ids, ideal_formation = result
+                    ideal_starters = ranked[ranked["id"].isin(ideal_starting_ids)].sort_values(
+                        "expected_score", ascending=False
                     )
-                with toggle_col2:
-                    maximize_budget_transfers = st.toggle(
-                        "Maximize budget utilization",
-                        help="Among transfers that genuinely improve your expected score "
-                        "(never a downgrade), picks the most expensive affordable "
-                        "option your bank allows, using expected score to choose "
-                        "between similarly-priced options. The number of transfers "
-                        "kept is capped at whatever count actually raises your net "
-                        "expected score once -4 hits are subtracted, so the overall "
-                        "set is never worse than your current squad — full budget use, "
-                        "but only the highest score reachable that way.",
+                    ideal_bench = ranked[ranked["id"].isin(ideal_bench_ids)].sort_values(
+                        "expected_score", ascending=False
                     )
-                num_transfers_to_consider = st.slider(
-                    "Number of transfers to consider",
-                    0,
-                    5,
-                    0,
-                    disabled=auto_maximize_transfers or maximize_budget_transfers,
-                    help="Finds up to this many transfers (same position, affordable, "
-                    "respects your estimated free-transfer count, applied together) that "
-                    "most improve this gameweek's expected score, then shows the "
-                    "resulting Ideal XI. 0 = just your current squad, no transfers.",
-                )
 
-                if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
-                    with st.spinner("Scanning every player for the best transfers..."):
-                        bank = current_picks["entry_history"].get("bank", 0) / 10.0
-                        ranked_all = recommend.recommend_captain(
-                            players["id"].tolist(), players, fixtures_data, next_gw
+                    cap, vice = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
+                    im1, im2 = st.columns(2, vertical_alignment="center")
+                    im1.metric("Ideal formation", ideal_formation)
+                    im2.metric("Expected score (XI)", f"{ideal_starters['expected_score'].sum():.1f}")
+                    label = f"**Suggested captain: {cap['web_name']}**"
+                    if vice is not None:
+                        label += f" · Vice: {vice['web_name']}"
+                    st.markdown(label)
+
+                    actual_starting_ids = {p["element"] for p in current_picks["picks"] if p["position"] <= 11}
+                    bench_to_start = ideal_starting_ids - actual_starting_ids
+                    start_to_bench = actual_starting_ids - ideal_starting_ids
+                    if bench_to_start or start_to_bench:
+                        id_to_name = dict(zip(players["id"], players["web_name"]))
+                        start_names = ", ".join(id_to_name.get(i, "?") for i in bench_to_start)
+                        bench_names = ", ".join(id_to_name.get(i, "?") for i in start_to_bench)
+                        st.warning(
+                            f"Differs from your currently set lineup — consider starting "
+                            f"**{start_names}** instead of **{bench_names}**."
                         )
-                        transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
-                        all_suggestions = opt.suggest_transfers(
-                            current_ids,
-                            transfer_pool,
-                            bank=bank,
-                            num_transfers=5,
-                            free_transfers=free_transfers,
-                            budget_weight=1.0 if maximize_budget_transfers else 0.0,
-                        )
-
-                        def _apply_transfers(k):
-                            ids = list(current_ids)
-                            for t in all_suggestions[:k]:
-                                ids = [t["in_id"] if i == t["out_id"] else i for i in ids]
-                            return ids
-
-                        def _net_expected_score(k):
-                            hypo_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(k))]
-                            hypo_result = opt.best_starting_xi(hypo_ranked, score_col="expected_score")
-                            if hypo_result is None:
-                                return None
-                            hypo_starters = hypo_ranked[hypo_ranked["id"].isin(hypo_result[0])]
-                            hits = sum(4 for t in all_suggestions[:k] if t["is_hit"])
-                            return hypo_starters["expected_score"].sum() - hits
-
-                        if auto_maximize_transfers or maximize_budget_transfers:
-                            # Both toggles cap the count via net expected score (score
-                            # after subtracting -4 hits) — even individually-improving
-                            # transfers can net negative once hit costs stack up, and
-                            # neither toggle should ever leave you worse off than your
-                            # current squad. The slider is disabled while either is on,
-                            # so there's no separate manual count to fall back to.
-                            best_k, best_net = 0, ideal_starters["expected_score"].sum()
-                            for k in range(1, len(all_suggestions) + 1):
-                                net = _net_expected_score(k)
-                                if net is not None and net > best_net:
-                                    best_k, best_net = k, net
-                            num_to_use = best_k
-                        else:
-                            num_to_use = num_transfers_to_consider
-
-                    transfer_suggestions = all_suggestions[:num_to_use]
-
-                    if num_to_use == 0:
-                        if auto_maximize_transfers or maximize_budget_transfers:
-                            st.info(
-                                "No transfer beats your current squad once hit costs are "
-                                "subtracted — 0 transfers is your net-best option, so the "
-                                "Ideal XI above already reflects it."
-                            )
-                        else:
-                            st.info(
-                                "No transfer improves this gameweek's expected score — your "
-                                "current squad is already your best option."
-                            )
                     else:
-                        st.divider()
-                        st.markdown(f"##### Ideal XI with {num_to_use} suggested transfer(s)")
-                        if auto_maximize_transfers:
-                            st.caption(
-                                f"Maximize potential score picked {num_to_use} transfer(s) — "
-                                "the highest net expected score across every count from 0 to "
-                                "5, hit costs included."
-                            )
-                        if maximize_budget_transfers:
-                            st.caption(
-                                "Maximize budget utilization is on — among transfers that "
-                                "genuinely improve your score, these pick the most "
-                                "expensive affordable option, using expected score to "
-                                "choose between similarly-priced options. Capped to the "
-                                "count that maximizes net expected score, hit costs "
-                                "included."
-                            )
-                        for i, t in enumerate(transfer_suggestions, start=1):
-                            hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
-                            st.markdown(
-                                f"**{i}. OUT:** {t['out_name']} ({t['out_team']}, "
-                                f"£{t['out_price']:.1f}m) → **IN:** {t['in_name']} "
-                                f"({t['in_team']}, £{t['in_price']:.1f}m){hit_label}"
-                            )
-                            st.caption(f"Expected-score gain: +{t['score_gain']:.1f} this gameweek")
+                        st.success("Your currently set lineup already matches this suggestion.")
 
-                        new_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(num_to_use))].copy()
-                        new_ranked["next_opp"] = new_ranked["team"].map(next_opp_by_team).fillna("—")
-                        new_result = (
-                            opt.best_starting_xi(new_ranked, score_col="expected_score")
-                            if not new_ranked.empty
-                            else None
+                    ideal_display_cols = {
+                        "web_name": "Player",
+                        "team_name": "Team",
+                        "position": "Pos",
+                        "next_opp": "Next",
+                        "expected_score": "Expected",
+                    }
+                    st.dataframe(
+                        ideal_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                    )
+                    st.caption("Bench")
+                    st.dataframe(
+                        ideal_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                    )
+
+                    st.markdown("#### Transfer Matrix")
+                    st.caption(
+                        "Suggest transfers against your actual squad and see the resulting "
+                        "Ideal XI for next gameweek. Nothing below runs until you turn on a "
+                        "toggle or move the slider."
+                    )
+                    toggle_col1, toggle_col2 = st.columns(2)
+                    with toggle_col1:
+                        auto_maximize_transfers = st.toggle(
+                            "Maximize potential score",
+                            help="Overrides the slider below — checks every transfer count "
+                            "from 0 up to 5, subtracts 4 points for each one beyond your free "
+                            "transfers, and uses whichever count gives the highest net "
+                            "expected score for this gameweek.",
                         )
-                        if new_result is None:
-                            st.info("Couldn't determine an ideal XI after these transfers.")
+                    with toggle_col2:
+                        maximize_budget_transfers = st.toggle(
+                            "Maximize budget utilization",
+                            help="Among transfers that genuinely improve your expected score "
+                            "(never a downgrade), picks the most expensive affordable "
+                            "option your bank allows, using expected score to choose "
+                            "between similarly-priced options. The number of transfers "
+                            "kept is capped at whatever count actually raises your net "
+                            "expected score once -4 hits are subtracted, so the overall "
+                            "set is never worse than your current squad — full budget use, "
+                            "but only the highest score reachable that way.",
+                        )
+                    num_transfers_to_consider = st.slider(
+                        "Number of transfers to consider",
+                        0,
+                        5,
+                        0,
+                        disabled=auto_maximize_transfers or maximize_budget_transfers,
+                        help="Finds up to this many transfers (same position, affordable, "
+                        "respects your estimated free-transfer count, applied together) that "
+                        "most improve this gameweek's expected score, then shows the "
+                        "resulting Ideal XI. 0 = just your current squad, no transfers.",
+                    )
+
+                    if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
+                        with st.spinner("Scanning every player for the best transfers..."):
+                            bank = current_picks["entry_history"].get("bank", 0) / 10.0
+                            ranked_all = recommend.recommend_captain(
+                                players["id"].tolist(), players, fixtures_data, next_gw
+                            )
+                            transfer_pool = ranked_all.assign(score=ranked_all["expected_score"])
+                            all_suggestions = opt.suggest_transfers(
+                                current_ids,
+                                transfer_pool,
+                                bank=bank,
+                                num_transfers=5,
+                                free_transfers=free_transfers,
+                                budget_weight=1.0 if maximize_budget_transfers else 0.0,
+                            )
+
+                            def _apply_transfers(k):
+                                ids = list(current_ids)
+                                for t in all_suggestions[:k]:
+                                    ids = [t["in_id"] if i == t["out_id"] else i for i in ids]
+                                return ids
+
+                            def _net_expected_score(k):
+                                hypo_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(k))]
+                                hypo_result = opt.best_starting_xi(hypo_ranked, score_col="expected_score")
+                                if hypo_result is None:
+                                    return None
+                                hypo_starters = hypo_ranked[hypo_ranked["id"].isin(hypo_result[0])]
+                                hits = sum(4 for t in all_suggestions[:k] if t["is_hit"])
+                                return hypo_starters["expected_score"].sum() - hits
+
+                            if auto_maximize_transfers or maximize_budget_transfers:
+                                # Both toggles cap the count via net expected score (score
+                                # after subtracting -4 hits) — even individually-improving
+                                # transfers can net negative once hit costs stack up, and
+                                # neither toggle should ever leave you worse off than your
+                                # current squad. The slider is disabled while either is on,
+                                # so there's no separate manual count to fall back to.
+                                best_k, best_net = 0, ideal_starters["expected_score"].sum()
+                                for k in range(1, len(all_suggestions) + 1):
+                                    net = _net_expected_score(k)
+                                    if net is not None and net > best_net:
+                                        best_k, best_net = k, net
+                                num_to_use = best_k
+                            else:
+                                num_to_use = num_transfers_to_consider
+
+                        transfer_suggestions = all_suggestions[:num_to_use]
+
+                        if num_to_use == 0:
+                            if auto_maximize_transfers or maximize_budget_transfers:
+                                st.info(
+                                    "No transfer beats your current squad once hit costs are "
+                                    "subtracted — 0 transfers is your net-best option, so the "
+                                    "Ideal XI above already reflects it."
+                                )
+                            else:
+                                st.info(
+                                    "No transfer improves this gameweek's expected score — your "
+                                    "current squad is already your best option."
+                                )
                         else:
-                            new_starting_ids, new_bench_ids, new_formation = new_result
-                            new_starters = new_ranked[new_ranked["id"].isin(new_starting_ids)].sort_values(
-                                "expected_score", ascending=False
-                            )
-                            new_bench = new_ranked[new_ranked["id"].isin(new_bench_ids)].sort_values(
-                                "expected_score", ascending=False
-                            )
-                            new_cap, new_vice = opt.pick_captain_vice(new_starters, score_col="expected_score")
-                            total_hits = sum(4 for t in transfer_suggestions if t["is_hit"])
-                            nm1, nm2, nm3 = st.columns(3, vertical_alignment="center")
-                            nm1.metric("Formation with transfers", new_formation)
-                            nm2.metric(
-                                "Expected score (XI) with transfers",
-                                f"{new_starters['expected_score'].sum():.1f}",
-                                delta=(
-                                    f"{new_starters['expected_score'].sum() - ideal_starters['expected_score'].sum():+.1f}"
-                                ),
-                            )
-                            nm3.metric(
-                                "Transfer-hit cost",
-                                f"{-total_hits}",
-                                help="Points lost to -4 hits on transfers beyond your free "
-                                "transfers, not yet subtracted from the expected score above.",
-                            )
-                            new_label = f"**Suggested captain: {new_cap['web_name']}**"
-                            if new_vice is not None:
-                                new_label += f" · Vice: {new_vice['web_name']}"
-                            st.markdown(new_label)
-                            st.dataframe(
-                                new_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
-                            )
-                            st.caption("Bench")
-                            st.dataframe(
-                                new_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
-                            )
+                            st.divider()
+                            st.markdown(f"##### Ideal XI with {num_to_use} suggested transfer(s)")
+                            if auto_maximize_transfers:
+                                st.caption(
+                                    f"Maximize potential score picked {num_to_use} transfer(s) — "
+                                    "the highest net expected score across every count from 0 to "
+                                    "5, hit costs included."
+                                )
+                            if maximize_budget_transfers:
+                                st.caption(
+                                    "Maximize budget utilization is on — among transfers that "
+                                    "genuinely improve your score, these pick the most "
+                                    "expensive affordable option, using expected score to "
+                                    "choose between similarly-priced options. Capped to the "
+                                    "count that maximizes net expected score, hit costs "
+                                    "included."
+                                )
+                            for i, t in enumerate(transfer_suggestions, start=1):
+                                hit_label = " (-4 hit)" if t["is_hit"] else " (free)"
+                                st.markdown(
+                                    f"**{i}. OUT:** {t['out_name']} ({t['out_team']}, "
+                                    f"£{t['out_price']:.1f}m) → **IN:** {t['in_name']} "
+                                    f"({t['in_team']}, £{t['in_price']:.1f}m){hit_label}"
+                                )
+                                st.caption(f"Expected-score gain: +{t['score_gain']:.1f} this gameweek")
 
-    st.markdown("#### Chip strategy")
-    st.caption(
-        "Personalized suggestions from your actual squad, current form, and fixtures — not "
-        "just blank/double gameweek detection. Same 'simple proxy, not a real forecast' "
-        "caveat as the rest of this app applies, more so this early in the season when form "
-        "and points-per-game have few games to draw on."
-    )
-    available_chips = chips.available_chips(bootstrap, chips_used, next_gw)
-    if fixtures_data is None:
-        st.info("Fixtures unavailable this session — can't compute chip suggestions.")
+                            new_ranked = ranked_all[ranked_all["id"].isin(_apply_transfers(num_to_use))].copy()
+                            new_ranked["next_opp"] = new_ranked["team"].map(next_opp_by_team).fillna("—")
+                            new_result = (
+                                opt.best_starting_xi(new_ranked, score_col="expected_score")
+                                if not new_ranked.empty
+                                else None
+                            )
+                            if new_result is None:
+                                st.info("Couldn't determine an ideal XI after these transfers.")
+                            else:
+                                new_starting_ids, new_bench_ids, new_formation = new_result
+                                new_starters = new_ranked[new_ranked["id"].isin(new_starting_ids)].sort_values(
+                                    "expected_score", ascending=False
+                                )
+                                new_bench = new_ranked[new_ranked["id"].isin(new_bench_ids)].sort_values(
+                                    "expected_score", ascending=False
+                                )
+                                new_cap, new_vice = opt.pick_captain_vice(new_starters, score_col="expected_score")
+                                total_hits = sum(4 for t in transfer_suggestions if t["is_hit"])
+                                nm1, nm2, nm3 = st.columns(3, vertical_alignment="center")
+                                nm1.metric("Formation with transfers", new_formation)
+                                nm2.metric(
+                                    "Expected score (XI) with transfers",
+                                    f"{new_starters['expected_score'].sum():.1f}",
+                                    delta=(
+                                        f"{new_starters['expected_score'].sum() - ideal_starters['expected_score'].sum():+.1f}"
+                                    ),
+                                )
+                                nm3.metric(
+                                    "Transfer-hit cost",
+                                    f"{-total_hits}",
+                                    help="Points lost to -4 hits on transfers beyond your free "
+                                    "transfers, not yet subtracted from the expected score above.",
+                                )
+                                new_label = f"**Suggested captain: {new_cap['web_name']}**"
+                                if new_vice is not None:
+                                    new_label += f" · Vice: {new_vice['web_name']}"
+                                st.markdown(new_label)
+                                st.dataframe(
+                                    new_starters[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                                )
+                                st.caption("Bench")
+                                st.dataframe(
+                                    new_bench[list(ideal_display_cols)].rename(columns=ideal_display_cols),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={"Expected": st.column_config.NumberColumn(format="%.1f")},
+                                )
+
+        st.markdown("#### Chip strategy")
+        st.caption(
+            "Personalized suggestions from your actual squad, current form, and fixtures — not "
+            "just blank/double gameweek detection. Same 'simple proxy, not a real forecast' "
+            "caveat as the rest of this app applies, more so this early in the season when form "
+            "and points-per-game have few games to draw on."
+        )
+        available_chips = chips.available_chips(bootstrap, chips_used, next_gw)
+        if fixtures_data is None:
+            st.info("Fixtures unavailable this session — can't compute chip suggestions.")
+        else:
+            try:
+                chip_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
+            except fpl_api.FPLAPIError as e:
+                st.error(f"Could not load your current squad: {e}")
+                chip_picks = None
+
+            if chip_picks is not None:
+                chip_current_ids = [p["element"] for p in chip_picks["picks"]]
+                chip_ranked_next = recommend.recommend_captain(chip_current_ids, players, fixtures_data, next_gw)
+                chip_xi = (
+                    opt.best_starting_xi(chip_ranked_next, score_col="expected_score")
+                    if not chip_ranked_next.empty
+                    else None
+                )
+
+                cols = st.columns(4)
+
+                with cols[0]:
+                    st.markdown("**Bench Boost**")
+                    bb = None
+                    if chip_xi is not None:
+                        starting_ids, bench_ids, _ = chip_xi
+                        ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
+                        ideal_bench = chip_ranked_next[chip_ranked_next["id"].isin(bench_ids)]
+                        bb = chips.suggest_bench_boost(ideal_starters, ideal_bench)
+                    if not available_chips.get("bboost"):
+                        st.caption("Already used / not available this window.")
+                    elif bb is None:
+                        st.caption("Not enough data.")
+                    elif bb["recommend"]:
+                        st.success(
+                            f"Good week — bench projects {bb['bench_total']:.1f} pts "
+                            f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
+                        )
+                    else:
+                        st.info(
+                            f"Save it — bench projects only {bb['bench_total']:.1f} pts "
+                            f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
+                        )
+
+                with cols[1]:
+                    st.markdown("**Triple Captain**")
+                    tc = None
+                    if chip_xi is not None:
+                        starting_ids, _, _ = chip_xi
+                        ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
+                        cap, _ = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
+                        tc = chips.suggest_triple_captain(cap)
+                    if not available_chips.get("3xc"):
+                        st.caption("Already used / not available this window.")
+                    elif tc is None:
+                        st.caption("Not enough data.")
+                    elif tc["recommend"]:
+                        reason = "double gameweek" if tc["is_double"] else "strong fixture"
+                        st.success(
+                            f"Good week — {tc['captain_name']} projects {tc['captain_score']:.1f} "
+                            f"pts ({reason})."
+                        )
+                    else:
+                        st.info(
+                            f"Save it — best captain ({tc['captain_name']}) only projects "
+                            f"{tc['captain_score']:.1f} pts."
+                        )
+
+                bank = chip_picks["entry_history"].get("bank", 0) / 10.0
+                value = chip_picks["entry_history"].get("value", 0) / 10.0
+                reset = chips.suggest_reset_chip(
+                    players, chip_current_ids, fixtures_data, next_gw, budget=bank + value
+                )
+
+                with cols[2]:
+                    st.markdown("**Free Hit**")
+                    if not available_chips.get("freehit"):
+                        st.caption("Already used / not available this window.")
+                    elif reset["recommend_freehit"]:
+                        st.success(
+                            f"Consider it — an optimal squad projects {reset['gap_next_gw'] * 100:.0f}% "
+                            f"higher ({reset['optimal_next_gw']:.1f} vs {reset['current_next_gw']:.1f} pts) "
+                            "just for this gameweek, and that gap doesn't persist over the coming weeks."
+                        )
+                    elif reset["gap_next_gw"] >= chips.FREEHIT_GAP_THRESHOLD:
+                        st.info(
+                            "Save it — this gameweek's gap is real, but it doesn't go away next week "
+                            "either, so Wildcard fixes it better than a one-week Free Hit."
+                        )
+                    else:
+                        st.info(
+                            f"Save it — only a {reset['gap_next_gw'] * 100:.0f}% gap to an optimal squad "
+                            "this gameweek."
+                        )
+
+                with cols[3]:
+                    st.markdown("**Wildcard**")
+                    if not available_chips.get("wildcard"):
+                        st.caption("Already used / not available this window.")
+                    elif reset["recommend_wildcard"]:
+                        st.success(
+                            f"Consider it — your squad projects {reset['gap_lookahead'] * 100:.0f}% below "
+                            f"an optimal one ({reset['optimal_lookahead']:.1f} vs "
+                            f"{reset['current_lookahead']:.1f} pts) over the next {reset['lookahead_gws']} "
+                            "gameweeks, not just a one-off."
+                        )
+                    else:
+                        st.info(
+                            f"Save it — only a {reset['gap_lookahead'] * 100:.0f}% gap to an optimal squad "
+                            f"over the next {reset['lookahead_gws']} gameweeks."
+                        )
     else:
+        # Viewing a past gameweek: the forward-looking planning tools above
+        # (Ideal XI, Transfer Matrix, Chip strategy) are all about what to
+        # do next, which doesn't apply to browsing history — show what
+        # actually happened that week instead.
+        st.markdown(f"#### Transfers made in GW{gw}")
         try:
-            chip_picks, _, _, _ = load_entry_picks(team_id, current_event, force_refresh=force_refresh)
+            all_transfers, _, _, _ = load_entry_transfers(team_id, force_refresh=force_refresh)
         except fpl_api.FPLAPIError as e:
-            st.error(f"Could not load your current squad: {e}")
-            chip_picks = None
+            st.error(f"Could not load transfer history: {e}")
+            all_transfers = []
+        gw_transfers = [t for t in all_transfers if t["event"] == gw]
+        if not gw_transfers:
+            st.info(f"No transfers were made in GW{gw}.")
+        else:
+            id_to_player = players.set_index("id")
 
-        if chip_picks is not None:
-            chip_current_ids = [p["element"] for p in chip_picks["picks"]]
-            chip_ranked_next = recommend.recommend_captain(chip_current_ids, players, fixtures_data, next_gw)
-            chip_xi = (
-                opt.best_starting_xi(chip_ranked_next, score_col="expected_score")
-                if not chip_ranked_next.empty
-                else None
-            )
+            def _describe_transfer_leg(pid, cost):
+                if pid in id_to_player.index:
+                    row = id_to_player.loc[pid]
+                    return f"{row['web_name']} ({row['team_short']}, £{cost / 10:.1f}m)"
+                return f"Player {pid} (£{cost / 10:.1f}m)"
 
-            cols = st.columns(4)
-
-            with cols[0]:
-                st.markdown("**Bench Boost**")
-                bb = None
-                if chip_xi is not None:
-                    starting_ids, bench_ids, _ = chip_xi
-                    ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
-                    ideal_bench = chip_ranked_next[chip_ranked_next["id"].isin(bench_ids)]
-                    bb = chips.suggest_bench_boost(ideal_starters, ideal_bench)
-                if not available_chips.get("bboost"):
-                    st.caption("Already used / not available this window.")
-                elif bb is None:
-                    st.caption("Not enough data.")
-                elif bb["recommend"]:
-                    st.success(
-                        f"Good week — bench projects {bb['bench_total']:.1f} pts "
-                        f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
-                    )
-                else:
-                    st.info(
-                        f"Save it — bench projects only {bb['bench_total']:.1f} pts "
-                        f"(avg {bb['bench_avg']:.1f} vs starters' {bb['starter_avg']:.1f})."
-                    )
-
-            with cols[1]:
-                st.markdown("**Triple Captain**")
-                tc = None
-                if chip_xi is not None:
-                    starting_ids, _, _ = chip_xi
-                    ideal_starters = chip_ranked_next[chip_ranked_next["id"].isin(starting_ids)]
-                    cap, _ = opt.pick_captain_vice(ideal_starters, score_col="expected_score")
-                    tc = chips.suggest_triple_captain(cap)
-                if not available_chips.get("3xc"):
-                    st.caption("Already used / not available this window.")
-                elif tc is None:
-                    st.caption("Not enough data.")
-                elif tc["recommend"]:
-                    reason = "double gameweek" if tc["is_double"] else "strong fixture"
-                    st.success(
-                        f"Good week — {tc['captain_name']} projects {tc['captain_score']:.1f} "
-                        f"pts ({reason})."
-                    )
-                else:
-                    st.info(
-                        f"Save it — best captain ({tc['captain_name']}) only projects "
-                        f"{tc['captain_score']:.1f} pts."
-                    )
-
-            bank = chip_picks["entry_history"].get("bank", 0) / 10.0
-            value = chip_picks["entry_history"].get("value", 0) / 10.0
-            reset = chips.suggest_reset_chip(
-                players, chip_current_ids, fixtures_data, next_gw, budget=bank + value
-            )
-
-            with cols[2]:
-                st.markdown("**Free Hit**")
-                if not available_chips.get("freehit"):
-                    st.caption("Already used / not available this window.")
-                elif reset["recommend_freehit"]:
-                    st.success(
-                        f"Consider it — an optimal squad projects {reset['gap_next_gw'] * 100:.0f}% "
-                        f"higher ({reset['optimal_next_gw']:.1f} vs {reset['current_next_gw']:.1f} pts) "
-                        "just for this gameweek, and that gap doesn't persist over the coming weeks."
-                    )
-                elif reset["gap_next_gw"] >= chips.FREEHIT_GAP_THRESHOLD:
-                    st.info(
-                        "Save it — this gameweek's gap is real, but it doesn't go away next week "
-                        "either, so Wildcard fixes it better than a one-week Free Hit."
-                    )
-                else:
-                    st.info(
-                        f"Save it — only a {reset['gap_next_gw'] * 100:.0f}% gap to an optimal squad "
-                        "this gameweek."
-                    )
-
-            with cols[3]:
-                st.markdown("**Wildcard**")
-                if not available_chips.get("wildcard"):
-                    st.caption("Already used / not available this window.")
-                elif reset["recommend_wildcard"]:
-                    st.success(
-                        f"Consider it — your squad projects {reset['gap_lookahead'] * 100:.0f}% below "
-                        f"an optimal one ({reset['optimal_lookahead']:.1f} vs "
-                        f"{reset['current_lookahead']:.1f} pts) over the next {reset['lookahead_gws']} "
-                        "gameweeks, not just a one-off."
-                    )
-                else:
-                    st.info(
-                        f"Save it — only a {reset['gap_lookahead'] * 100:.0f}% gap to an optimal squad "
-                        f"over the next {reset['lookahead_gws']} gameweeks."
-                    )
+            for t in gw_transfers:
+                st.markdown(
+                    f"**OUT:** {_describe_transfer_leg(t['element_out'], t['element_out_cost'])} "
+                    f"→ **IN:** {_describe_transfer_leg(t['element_in'], t['element_in_cost'])}"
+                )
 
     st.markdown("#### Season history")
     history_df = team.build_season_history_df(history)
