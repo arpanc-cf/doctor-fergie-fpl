@@ -1215,6 +1215,12 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     "Ideal XI for next gameweek. Nothing below runs until you turn on a "
                     "toggle or move the slider."
                 )
+                st.caption(
+                    "Transfer ranking gives extra priority to injured or low-availability "
+                    "players as transfer-outs. The displayed expected-score gain remains "
+                    "the projected point change; low-chance players are left out of the "
+                    "recommended XI when a valid formation allows it."
+                )
                 chip_choice = st.radio(
                     "Planning to play a chip next gameweek?",
                     ["None", "Wildcard", "Free Hit"],
