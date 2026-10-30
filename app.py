@@ -1363,6 +1363,19 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     else:
                         st.divider()
                         st.markdown(f"##### Ideal XI with {num_to_use} Suggested Transfer(s)")
+                        free_used = sum(not t["is_hit"] for t in transfer_suggestions)
+                        hit_count = sum(t["is_hit"] for t in transfer_suggestions)
+                        if chip_active:
+                            st.caption(
+                                f"Estimated free transfers banked: {free_transfers} · "
+                                f"{chip_choice} makes all {num_to_use} suggested transfers free."
+                            )
+                        else:
+                            st.caption(
+                                f"Estimated free transfers available: {free_transfers} · "
+                                f"This plan uses {free_used} free and {hit_count} hit "
+                                f"{\"transfer\" if hit_count == 1 else \"transfers\"} (-4 each)."
+                            )
                         if auto_maximize_transfers:
                             st.caption(
                                 f"Maximize potential score picked {num_to_use} transfer(s) — "
