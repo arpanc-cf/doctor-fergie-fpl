@@ -8,6 +8,8 @@ starting point for your own judgement, not gospel; "can refine later"
 per the project brief.
 """
 
+import math
+
 import pulp
 
 from . import forecast
@@ -32,6 +34,7 @@ DIVERSIFICATION_ELITE_PERCENTILE = 0.85
 DIVERSIFICATION_PENALTY_SCALE = 3.0  # points-equivalent penalty per unit of shortfall below the elite bar
 BENCH_WEIGHT = 0.02  # keeps bench selection meaningful without competing with the XI
 UNAVAILABLE_STATUSES = {"i", "s", "u"}  # injured, suspended, unavailable/left club
+TRANSFER_OUT_AVAILABILITY_BONUS = 2.0  # ranking bonus at full risk; not forecast points
 SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, at budget_weight=1
 # Large enough that, at budget_weight=1, price alone decides between any two
 # genuinely score-improving transfer candidates in suggest_transfers.
@@ -146,6 +149,32 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
     return df
 
 
+def _availability_multiplier(players_df):
+    """Expected playing share; a doubtful with no probability is treated as 50%."""
+    chance = players_df["chance_of_playing_next_round"]
+    status = players_df["status"]
+    doubtful_without_chance = status.eq("d") & chance.isna()
+    chance = chance.fillna(100).mask(doubtful_without_chance, 50)
+    availability = chance / 100.0
+    return availability.where(~status.isin(UNAVAILABLE_STATUSES), 0.0)
+
+
+def _availability_risk(player):
+    """0-1 transfer-out urgency from play chance and FPL availability status."""
+    status = player.get("status")
+    if status in UNAVAILABLE_STATUSES:
+        return 1.0
+    chance = player.get("chance_of_playing_next_round", 100)
+    try:
+        chance = float(chance)
+    except (TypeError, ValueError):
+        chance = 50.0 if status == "d" else 100.0
+    if not math.isfinite(chance):
+        chance = 50.0 if status == "d" else 100.0
+    risk = 1.0 - min(max(chance, 0.0), 100.0) / 100.0
+    return max(risk, 0.5) if status == "d" else risk
+
+
 def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
     """Add a 'score' column: a blend of underlying form (see
     compute_underlying_form) and points-per-game, scaled down for players
@@ -162,8 +191,7 @@ def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
     df = compute_underlying_form(players_df)
     base = form_weight * df["underlying_form"].fillna(0) + ppg_weight * df["points_per_game"].fillna(0)
 
-    availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
-    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
+    availability = _availability_multiplier(df)
     df["score"] = base * availability
     return df
 
@@ -193,8 +221,7 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
         lambda i: prior_stats.get(i, {}).get("points_per_90")
     )
     has_data = last_ppg90.notna()
-    availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
-    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
+    availability = _availability_multiplier(df)
     df.loc[has_data, "score"] = (1 - weight) * df.loc[has_data, "score"] + weight * (
         last_ppg90[has_data] * availability[has_data]
     )
@@ -381,7 +408,7 @@ def is_starting_eligible(df):
     STARTING_CHANCE_THRESHOLD chance of playing (a live doubt, even if not
     yet ruled out).
     """
-    chance = df["chance_of_playing_next_round"].fillna(100)
+    chance = _availability_multiplier(df) * 100
     return (chance >= STARTING_CHANCE_THRESHOLD) & (~df["status"].isin(UNAVAILABLE_STATUSES))
 
 
@@ -474,13 +501,12 @@ def suggest_transfers(
     affordable, club-limit respected) that maximize score gain one at a
     time. Transfers beyond free_transfers are flagged as -4 point hits.
 
-    A squad member is always eligible to be the "out" side of a swap,
-    regardless of exclude_unavailable — a suspended, injured, or badly
-    doubtful player already carries a low/zero score (see compute_score),
-    so this naturally surfaces them as the top transfer-out candidate
-    whenever a better replacement exists. exclude_unavailable only keeps
-    such players out of the incoming "in" pool, since you wouldn't want to
-    buy one.
+    A squad member is always eligible to be the "out" side of a swap. In
+    addition to forecast gain, an availability-risk bonus gives injured,
+    suspended, unavailable, and doubtful players more transfer-out priority.
+    This ranking bonus is not added to the displayed expected-score gain.
+    exclude_unavailable only keeps hard-unavailable players out of the
+    incoming "in" pool.
 
     Every candidate considered must genuinely improve score (gain > 0) —
     this never suggests a downgrade, regardless of budget_weight. A
@@ -493,7 +519,7 @@ def suggest_transfers(
 
     budget_weight (0-1) changes which improving swap "best" means among
     those that pass the gain > 0 gate. At 0 (default), the highest-gain
-    one wins — pure score maximization. At 1 (full weight, "maximize
+    one wins using expected gain plus an availability-risk bonus. At 1 (full weight, "maximize
     budget utilization"), price dominates the comparison instead, so the
     most expensive still-improving option wins, with score only breaking
     ties among similarly-priced candidates. Paired with a transfer-count
@@ -574,6 +600,7 @@ def suggest_transfers(
                 gain = in_row["score"] - out_row["score"] - diversification_penalty
                 if gain <= 0:
                     continue
+                availability_bonus = TRANSFER_OUT_AVAILABILITY_BONUS * _availability_risk(out_row)
                 price_delta = in_row["price"] - sell_price
                 # At budget_weight=1, in_row["price"] * TRANSFER_BUDGET_DOMINANCE
                 # dwarfs any realistic score gain, so among the still-improving
@@ -581,7 +608,7 @@ def suggest_transfers(
                 # budget_weight) the priciest one always wins outright, with
                 # gain only breaking ties between similarly-priced candidates.
                 spend_bonus = budget_weight * in_row["price"] * TRANSFER_BUDGET_DOMINANCE
-                adjusted_gain = gain + spend_bonus
+                adjusted_gain = gain + availability_bonus + spend_bonus
                 if best is None or adjusted_gain > best["adjusted_gain"]:
                     best = {
                         "out_id": out_id,
