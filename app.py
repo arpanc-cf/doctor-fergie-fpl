@@ -1,11 +1,19 @@
 """Doctor Fergie."""
 
+import importlib
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from src import chips, config, fixtures as fx, fpl_api, history, optimizer as opt, recommend, team
 from src.cache import delete as cache_delete, delete_prefix as cache_delete_prefix, get_or_fetch
+
+# Streamlit can rerun app.py before refreshing an already-imported local
+# module during a hot code update. Reload the optimizer once if that leaves
+# the new calibrated defaults unavailable in the running worker.
+if not hasattr(opt, "DEFAULT_FORM_WEIGHT"):
+    opt = importlib.reload(opt)
 
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour
 PRIOR_SEASON_CACHE_MAX_AGE_SECONDS = 90 * 24 * 3600  # completed-season stats never change
