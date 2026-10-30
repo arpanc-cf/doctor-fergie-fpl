@@ -1303,16 +1303,29 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 )
                 marker_pct = free_marker_ratio * 100
                 marker_offset_px = free_marker_ratio * 24
+                marker_transform = (
+                    "translateX(0)"
+                    if free_marker_ratio < 0.18
+                    else "translateX(-100%)"
+                    if free_marker_ratio > 0.82
+                    else "translateX(-50%)"
+                )
+                marker_text = (
+                    f"ALL TRANSFERS FREE · {chip_choice.upper()}"
+                    if chip_active
+                    else f"FREE TRANSFERS · {free_transfers} AVAILABLE"
+                )
                 st.markdown(
-                    f"<div style='position:relative;height:9px;margin-top:-7px;'>"
-                    f"<span style='position:absolute;left:calc(12px + {marker_pct:.3f}% - "
-                    f"{marker_offset_px:.3f}px);top:0;height:9px;border-left:2px solid #FFD166;'></span></div>",
+                    f"""<div style="position:relative;height:34px;margin-top:-8px;">"""
+                    f"""<div style="position:absolute;left:calc(12px + {marker_pct:.3f}% - {marker_offset_px:.3f}px);top:0;transform:{marker_transform};text-align:center;">"""
+                    f"""<div style="height:13px;width:3px;background:#FFD84D;border-radius:2px;box-shadow:0 0 8px rgba(255,216,77,.8);margin:0 auto;"></div>"""
+                    f"""<div style="display:inline-block;margin-top:2px;padding:4px 9px;border-radius:999px;background:#FFD84D;color:#26002B;font-size:11px;font-weight:800;letter-spacing:.03em;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);">{marker_text}</div></div></div>"""
                     unsafe_allow_html=True,
                 )
                 st.caption(
-                    f"Gold marker: {free_transfers} estimated free transfers"
+                    "The gold marker shows how many transfers you can make without a hit."
                     if not chip_active
-                    else f"Gold marker: all transfers are free with {chip_choice}"
+                    else f"{chip_choice} makes every transfer free this gameweek."
                 )
 
                 if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
