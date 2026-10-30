@@ -8,8 +8,11 @@ starting point for your own judgement, not gospel; "can refine later"
 per the project brief.
 """
 
+import math
+
 import pulp
 
+from . import forecast
 from .fixtures import team_fixture_multipliers
 
 POSITIONS = ["GKP", "DEF", "MID", "FWD"]
@@ -17,8 +20,21 @@ SQUAD_QUOTA = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
 STARTING_MIN = {"GKP": 1, "DEF": 3, "MID": 2, "FWD": 1}
 STARTING_MAX = {"GKP": 1, "DEF": 5, "MID": 5, "FWD": 3}
 MAX_PER_CLUB = 3
+# Two players in the same position from the same club are a correlated bet,
+# not two independent ones — if that club has a bad defensive or attacking
+# week, both go quiet together. Rather than a hard cap on how many a squad
+# can hold, the optimizer and transfer suggester apply a soft score penalty
+# to such a pair, sized by how far the WEAKER of the two falls short of an
+# "elite" bar (that position's own DIVERSIFICATION_ELITE_PERCENTILE score in
+# the current player pool). Two genuinely elite teammates cost nothing to
+# pair; a strong player alongside a mediocre one from the same club is
+# discouraged, since the mediocre pick's value is most likely to evaporate
+# exactly when the strong one's does too.
+DIVERSIFICATION_ELITE_PERCENTILE = 0.85
+DIVERSIFICATION_PENALTY_SCALE = 3.0  # points-equivalent penalty per unit of shortfall below the elite bar
 BENCH_WEIGHT = 0.02  # keeps bench selection meaningful without competing with the XI
 UNAVAILABLE_STATUSES = {"i", "s", "u"}  # injured, suspended, unavailable/left club
+TRANSFER_OUT_AVAILABILITY_BONUS = 2.0  # ranking bonus at full risk; not forecast points
 SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, at budget_weight=1
 # Large enough that, at budget_weight=1, price alone decides between any two
 # genuinely score-improving transfer candidates in suggest_transfers.
@@ -33,6 +49,13 @@ CLEAN_SHEET_POINTS = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
 ASSIST_POINTS = 3
 SAVE_POINTS_PER_SAVE = 1 / 3
 MIN_MINUTES_FOR_UNDERLYING_FORM = 60  # ~1 full match; below this, per-90 rates are wild noise
+# A player just past MIN_MINUTES_FOR_UNDERLYING_FORM (e.g. 63 minutes) is still a
+# tiny, noisy sample — one lucky big chance can extrapolate to an absurd per-90
+# rate. Confidence in the per-90 rate ramps linearly from 0 at the noise floor
+# up to full weight once a player has racked up this many minutes (~2 full
+# matches) — enough to smooth out a single-cameo fluke without taking half a
+# season to trust an established starter's rate.
+FULL_CONFIDENCE_MINUTES = 180
 
 # Threat/creativity are FPL's own ICT-index components (shot-based attacking
 # threat, chance-creation) — the closest public proxy for shots/shots-on-target
@@ -76,7 +99,12 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
     per 90 (clipped to [0, 1]) — a rough but explainable proxy, not a real
     probability model. Players under min_minutes get 0: with so few
     minutes, a per-90 rate is more noise than signal (a single stoppage-time
-    cameo goal would otherwise imply an absurd scoring rate).
+    cameo goal would otherwise imply an absurd scoring rate). Above that
+    floor, confidence in the per-90 rate ramps linearly up to
+    FULL_CONFIDENCE_MINUTES — a player a few minutes past the floor still
+    has a tiny, noisy sample (one lucky chance can extrapolate to an absurd
+    rate), so their estimate is scaled down proportionally rather than
+    given the same full weight as an established starter.
 
     Also folds in, for all positions, a small threat/creativity component
     (FPL's own ICT-index proxies for shot volume and chance creation — the
@@ -116,8 +144,35 @@ def compute_underlying_form(players_df, min_minutes=MIN_MINUTES_FOR_UNDERLYING_F
         + (threat90 + creativity90) * ICT_COMPONENT_SCALE
         + dc_contribution
     )
-    df["underlying_form"] = underlying.where(minutes >= min_minutes, 0.0)
+    confidence = ((minutes - min_minutes) / (FULL_CONFIDENCE_MINUTES - min_minutes)).clip(lower=0, upper=1)
+    df["underlying_form"] = underlying * confidence
     return df
+
+
+def _availability_multiplier(players_df):
+    """Expected playing share; a doubtful with no probability is treated as 50%."""
+    chance = players_df["chance_of_playing_next_round"]
+    status = players_df["status"]
+    doubtful_without_chance = status.eq("d") & chance.isna()
+    chance = chance.fillna(100).mask(doubtful_without_chance, 50)
+    availability = chance / 100.0
+    return availability.where(~status.isin(UNAVAILABLE_STATUSES), 0.0)
+
+
+def _availability_risk(player):
+    """0-1 transfer-out urgency from play chance and FPL availability status."""
+    status = player.get("status")
+    if status in UNAVAILABLE_STATUSES:
+        return 1.0
+    chance = player.get("chance_of_playing_next_round", 100)
+    try:
+        chance = float(chance)
+    except (TypeError, ValueError):
+        chance = 50.0 if status == "d" else 100.0
+    if not math.isfinite(chance):
+        chance = 50.0 if status == "d" else 100.0
+    risk = 1.0 - min(max(chance, 0.0), 100.0) / 100.0
+    return max(risk, 0.5) if status == "d" else risk
 
 
 def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
@@ -136,8 +191,7 @@ def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
     df = compute_underlying_form(players_df)
     base = form_weight * df["underlying_form"].fillna(0) + ppg_weight * df["points_per_game"].fillna(0)
 
-    availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
-    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
+    availability = _availability_multiplier(df)
     df["score"] = base * availability
     return df
 
@@ -167,8 +221,7 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
         lambda i: prior_stats.get(i, {}).get("points_per_90")
     )
     has_data = last_ppg90.notna()
-    availability = df["chance_of_playing_next_round"].fillna(100) / 100.0
-    availability = availability.where(~df["status"].isin(UNAVAILABLE_STATUSES), 0.0)
+    availability = _availability_multiplier(df)
     df.loc[has_data, "score"] = (1 - weight) * df.loc[has_data, "score"] + weight * (
         last_ppg90[has_data] * availability[has_data]
     )
@@ -177,8 +230,16 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
 
 def apply_fixture_adjustment(scored_df, fixtures, start_gw, num_gws, fixture_weight=0.5):
     """Blend each player's score with how favourable their team's next
-    num_gws fixtures are (see fixtures.team_fixture_multipliers) — a good
-    run of fixtures boosts the score, a bad run or blanks reduce it.
+    num_gws fixtures are — a good run of fixtures boosts the score, a bad
+    run or blanks reduce it.
+
+    Uses forecast.py's expected-goals model (fit from this season's actual
+    results) when there's enough data: MID/FWD scale with expected goals
+    for, GKP/DEF scale with expected clean-sheet probability, both via
+    forecast.team_window_multipliers. Falls back to FPL's own 1-5 Fixture
+    Difficulty Rating (fixtures.team_fixture_multipliers, applied the same
+    way to every position) when there isn't enough finished-match data yet
+    to fit the model.
 
     fixture_weight=0 leaves scores unchanged (the old, fixture-blind
     behavior); fixture_weight=1 applies the full fixture multiplier.
@@ -188,11 +249,43 @@ def apply_fixture_adjustment(scored_df, fixtures, start_gw, num_gws, fixture_wei
     if fixture_weight <= 0 or not fixtures:
         return scored_df
     df = scored_df.copy()
-    multipliers = team_fixture_multipliers(fixtures, start_gw, num_gws)
-    raw_multiplier = df["team"].map(multipliers).fillna(1.0)
+    strengths, home_advantage, league_avg_attack = forecast.fit_team_strengths_from_players(fixtures, df)
+
+    if strengths is None:
+        raw_multiplier = df["team"].map(team_fixture_multipliers(fixtures, start_gw, num_gws)).fillna(1.0)
+    else:
+        window = forecast.team_window_multipliers(
+            fixtures, start_gw, num_gws, strengths, home_advantage, league_avg_attack
+        )
+        is_defensive = df["position"].isin(forecast.DEFENSIVE_POSITIONS)
+        raw_multiplier = df["team"].map(lambda t: window.get(t, {}).get("attack", 1.0))
+        raw_multiplier = raw_multiplier.where(
+            ~is_defensive, df["team"].map(lambda t: window.get(t, {}).get("defence", 1.0))
+        )
+
     effective_multiplier = 1 + fixture_weight * (raw_multiplier - 1)
     df["score"] = df["score"] * effective_multiplier
     return df
+
+
+def _position_elite_thresholds(df):
+    """{position: score at the DIVERSIFICATION_ELITE_PERCENTILE within that
+    position}, for the diversification penalty below. Computed fresh from
+    whatever pool is being considered rather than a fixed constant, since
+    the "score" scale itself shifts with the weights it was built from.
+    """
+    return {
+        pos: df.loc[df["position"] == pos, "score"].quantile(DIVERSIFICATION_ELITE_PERCENTILE)
+        for pos in df["position"].unique()
+    }
+
+
+def _diversification_penalty(score_a, score_b, elite_threshold):
+    """Points-equivalent penalty for rostering/buying two same-club,
+    same-position players together — see DIVERSIFICATION_PENALTY_SCALE.
+    """
+    shortfall = max(elite_threshold - min(score_a, score_b), 0)
+    return DIVERSIFICATION_PENALTY_SCALE * shortfall
 
 
 def optimize_squad(players_df, budget=100.0, exclude_unavailable=True, formation=None, budget_weight=0.0):
@@ -210,6 +303,10 @@ def optimize_squad(players_df, budget=100.0, exclude_unavailable=True, formation
     the full budget is worth up to SPEND_BONUS_SCALE points-equivalent,
     which can outweigh small score differences and pull picks toward
     pricier players even when they don't score much higher.
+
+    Also discourages (but doesn't forbid) rostering two same-club,
+    same-position players unless both are genuinely elite — see
+    DIVERSIFICATION_PENALTY_SCALE.
     """
     df = players_df.reset_index(drop=True)
     if exclude_unavailable:
@@ -221,12 +318,36 @@ def optimize_squad(players_df, budget=100.0, exclude_unavailable=True, formation
     squad_vars = {i: pulp.LpVariable(f"squad_{i}", cat="Binary") for i in df.index}
     start_vars = {i: pulp.LpVariable(f"start_{i}", cat="Binary") for i in df.index}
 
+    # Same-club, same-position pairs get a soft penalty (see
+    # DIVERSIFICATION_PENALTY_SCALE) instead of a hard cap: a "both selected"
+    # binary per risky pair, wired to cost points in the objective only when
+    # the optimizer actually picks both.
+    elite_thresholds = _position_elite_thresholds(df)
+    diversification_terms = []
+    for (_, pos), group in df.groupby(["team_name", "position"]):
+        idxs = group.index.tolist()
+        threshold = elite_thresholds.get(pos, 0)
+        for a in range(len(idxs)):
+            for b in range(a + 1, len(idxs)):
+                i, j = idxs[a], idxs[b]
+                penalty = _diversification_penalty(df.loc[i, "score"], df.loc[j, "score"], threshold)
+                if penalty <= 0:
+                    continue
+                pair_var = pulp.LpVariable(f"pair_{i}_{j}", cat="Binary")
+                prob += pair_var <= squad_vars[i]
+                prob += pair_var <= squad_vars[j]
+                prob += pair_var >= squad_vars[i] + squad_vars[j] - 1
+                diversification_terms.append(penalty * pair_var)
+
     spend_bonus_per_unit_price = budget_weight * SPEND_BONUS_SCALE / budget
-    prob += pulp.lpSum(
-        start_vars[i] * df.loc[i, "score"]
-        + BENCH_WEIGHT * squad_vars[i] * df.loc[i, "score"]
-        + spend_bonus_per_unit_price * squad_vars[i] * df.loc[i, "price"]
-        for i in df.index
+    prob += (
+        pulp.lpSum(
+            start_vars[i] * df.loc[i, "score"]
+            + BENCH_WEIGHT * squad_vars[i] * df.loc[i, "score"]
+            + spend_bonus_per_unit_price * squad_vars[i] * df.loc[i, "price"]
+            for i in df.index
+        )
+        - pulp.lpSum(diversification_terms)
     )
 
     prob += pulp.lpSum(squad_vars[i] for i in df.index) == 15
@@ -287,7 +408,7 @@ def is_starting_eligible(df):
     STARTING_CHANCE_THRESHOLD chance of playing (a live doubt, even if not
     yet ruled out).
     """
-    chance = df["chance_of_playing_next_round"].fillna(100)
+    chance = _availability_multiplier(df) * 100
     return (chance >= STARTING_CHANCE_THRESHOLD) & (~df["status"].isin(UNAVAILABLE_STATUSES))
 
 
@@ -380,20 +501,25 @@ def suggest_transfers(
     affordable, club-limit respected) that maximize score gain one at a
     time. Transfers beyond free_transfers are flagged as -4 point hits.
 
-    A squad member is always eligible to be the "out" side of a swap,
-    regardless of exclude_unavailable — a suspended, injured, or badly
-    doubtful player already carries a low/zero score (see compute_score),
-    so this naturally surfaces them as the top transfer-out candidate
-    whenever a better replacement exists. exclude_unavailable only keeps
-    such players out of the incoming "in" pool, since you wouldn't want to
-    buy one.
+    A squad member is always eligible to be the "out" side of a swap. In
+    addition to forecast gain, an availability-risk bonus gives injured,
+    suspended, unavailable, and doubtful players more transfer-out priority.
+    This ranking bonus is not added to the displayed expected-score gain.
+    exclude_unavailable only keeps hard-unavailable players out of the
+    incoming "in" pool.
 
     Every candidate considered must genuinely improve score (gain > 0) —
-    this never suggests a downgrade, regardless of budget_weight.
+    this never suggests a downgrade, regardless of budget_weight. A
+    candidate that would pair the incoming player with an existing
+    same-club, same-position squad-mate has its gain reduced by the same
+    diversification penalty used in optimize_squad (see
+    DIVERSIFICATION_PENALTY_SCALE) before that check, so a marginal
+    upgrade that also concentrates risk in one club needs to clear a
+    higher bar.
 
     budget_weight (0-1) changes which improving swap "best" means among
     those that pass the gain > 0 gate. At 0 (default), the highest-gain
-    one wins — pure score maximization. At 1 (full weight, "maximize
+    one wins using expected gain plus an availability-risk bonus. At 1 (full weight, "maximize
     budget utilization"), price dominates the comparison instead, so the
     most expensive still-improving option wins, with score only breaking
     ties among similarly-priced candidates. Paired with a transfer-count
@@ -409,6 +535,7 @@ def suggest_transfers(
     """
     df = players_df.reset_index(drop=True)
     buy_pool = df[~df["status"].isin(UNAVAILABLE_STATUSES)] if exclude_unavailable else df
+    elite_thresholds = _position_elite_thresholds(df)
 
     by_id = df.set_index("id")
     squad_ids = list(current_ids)
@@ -441,6 +568,14 @@ def suggest_transfers(
             sell_price = out_row["price"]
             budget_for_buy = remaining_bank + sell_price
             out_club_count_after = club_counts.get(out_row["team_name"], 0) - 1
+            # Remaining squad-mates at this position, for the same-club
+            # diversification penalty below (out_id itself is leaving).
+            same_position_teammates = [
+                pid
+                for pid in squad_ids
+                if pid != out_id and pid in by_id.index and by_id.loc[pid, "position"] == out_row["position"]
+            ]
+            elite_threshold = elite_thresholds.get(out_row["position"], 0)
 
             candidates = buy_pool[
                 (buy_pool["position"] == out_row["position"])
@@ -455,9 +590,17 @@ def suggest_transfers(
                     club_after = club_counts.get(in_row["team_name"], 0) + 1
                 if club_after > MAX_PER_CLUB:
                     continue
-                gain = in_row["score"] - out_row["score"]
+                # Buying in_row alongside an existing same-club, same-position
+                # teammate is a correlated bet — see DIVERSIFICATION_PENALTY_SCALE.
+                diversification_penalty = sum(
+                    _diversification_penalty(in_row["score"], by_id.loc[tid, "score"], elite_threshold)
+                    for tid in same_position_teammates
+                    if by_id.loc[tid, "team_name"] == in_row["team_name"]
+                )
+                gain = in_row["score"] - out_row["score"] - diversification_penalty
                 if gain <= 0:
                     continue
+                availability_bonus = TRANSFER_OUT_AVAILABILITY_BONUS * _availability_risk(out_row)
                 price_delta = in_row["price"] - sell_price
                 # At budget_weight=1, in_row["price"] * TRANSFER_BUDGET_DOMINANCE
                 # dwarfs any realistic score gain, so among the still-improving
@@ -465,7 +608,7 @@ def suggest_transfers(
                 # budget_weight) the priciest one always wins outright, with
                 # gain only breaking ties between similarly-priced candidates.
                 spend_bonus = budget_weight * in_row["price"] * TRANSFER_BUDGET_DOMINANCE
-                adjusted_gain = gain + spend_bonus
+                adjusted_gain = gain + availability_bonus + spend_bonus
                 if best is None or adjusted_gain > best["adjusted_gain"]:
                     best = {
                         "out_id": out_id,

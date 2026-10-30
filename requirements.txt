@@ -2,5 +2,5 @@ streamlit>=1.35
 requests>=2.31
 urllib3<2
 pandas>=2.0
-pulp>=2.8
+pulp>=3.3.2,<4.0
 plotly>=5.20

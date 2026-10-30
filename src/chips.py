@@ -50,6 +50,22 @@ def available_chips(bootstrap, chips_used, current_gw):
     return result
 
 
+def next_chip_window_start(bootstrap, chip_name, current_gw):
+    """The start_event of the next not-yet-open window for chip_name after
+    current_gw (whether the current window is still ahead, already used,
+    or this chip hasn't opened for the season at all yet), or None if
+    there isn't a later one — e.g. already in the season's final window.
+    Reads the actual boundary from the API (bootstrap's 'chips' list)
+    rather than hardcoding a gameweek, since it can shift season to season.
+    """
+    upcoming = [
+        chip["start_event"]
+        for chip in bootstrap.get("chips", [])
+        if chip["name"] == chip_name and chip["start_event"] > current_gw
+    ]
+    return min(upcoming) if upcoming else None
+
+
 def suggest_bench_boost(ideal_starters, ideal_bench, score_col="expected_score"):
     """Bench Boost counts your bench's points too — worth it when your
     bench is projected to score close to what your starters are, not just
@@ -120,6 +136,8 @@ def suggest_reset_chip(
     ppg_weight=0.3,
     fixture_weight=0.5,
     lookahead_gws=5,
+    prior_stats=None,
+    last_season_weight=0.3,
 ):
     """Compare the manager's current squad against an optimal one at the
     same budget, both for just next_gw (Free Hit territory — a one-week
@@ -127,11 +145,24 @@ def suggest_reset_chip(
     territory — a permanent reset). budget should reflect the manager's
     real spending power (current squad value + bank), so the "optimal"
     comparison is achievable, not aspirational.
+
+    prior_stats/last_season_weight (see optimizer.apply_last_season_adjustment)
+    match Optimizer Draft's default scoring methodology, so the "optimal"
+    squad this suggests is judged the same way as the Optimizer Draft
+    tab's own "Maximize score" — otherwise the two could point to
+    different squads at the same budget purely from scoring differently.
     """
     all_ids = players_df["id"].tolist()
 
     ranked_next = recommend.recommend_captain(
-        all_ids, players_df, fixtures_data, next_gw, form_weight, ppg_weight
+        all_ids,
+        players_df,
+        fixtures_data,
+        next_gw,
+        form_weight,
+        ppg_weight,
+        prior_stats=prior_stats,
+        last_season_weight=last_season_weight,
     )
     current_next, optimal_next = _current_vs_optimal(
         ranked_next, current_ids, budget, "expected_score"
@@ -139,6 +170,8 @@ def suggest_reset_chip(
     gap_next = max(0.0, (optimal_next - current_next) / current_next) if current_next > 0 else 0.0
 
     scored_5gw = opt.compute_score(players_df, form_weight=form_weight, ppg_weight=ppg_weight)
+    if prior_stats:
+        scored_5gw = opt.apply_last_season_adjustment(scored_5gw, prior_stats, weight=last_season_weight)
     scored_5gw = opt.apply_fixture_adjustment(
         scored_5gw, fixtures_data, next_gw, lookahead_gws, fixture_weight=fixture_weight
     )
