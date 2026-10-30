@@ -1249,6 +1249,16 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                 max_transfers = len(current_ids) if chip_active else 5
                 effective_free_transfers = len(current_ids) if chip_active else free_transfers
 
+                pending_transfer_count = st.session_state.pop("pending_transfer_count", None)
+                slider_transfer_count = (
+                    pending_transfer_count
+                    if pending_transfer_count is not None
+                    else st.session_state.get("transfer_count_slider", 0)
+                )
+                st.session_state["transfer_count_slider"] = min(
+                    max(int(slider_transfer_count), 0), max_transfers
+                )
+
                 toggle_col1, toggle_col2 = st.columns(2)
                 with toggle_col1:
                     auto_maximize_transfers = st.toggle(
@@ -1271,7 +1281,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     "Number of transfers to consider",
                     0,
                     max_transfers,
-                    0,
+                    key="transfer_count_slider",
                     disabled=auto_maximize_transfers or maximize_budget_transfers,
                     help=(
                         "Looks for up to this many transfers — same position and affordable — "
@@ -1284,6 +1294,25 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                         "gameweek's expected score the most, then shows the resulting Ideal XI. "
                         "Leave it at zero to just see your current squad with no transfers."
                     ),
+                )
+
+                free_marker_ratio = (
+                    min(effective_free_transfers, max_transfers) / max_transfers
+                    if max_transfers
+                    else 0
+                )
+                marker_pct = free_marker_ratio * 100
+                marker_offset_px = free_marker_ratio * 24
+                st.markdown(
+                    f"<div style='position:relative;height:9px;margin-top:-7px;'>"
+                    f"<span style='position:absolute;left:calc(12px + {marker_pct:.3f}% - "
+                    f"{marker_offset_px:.3f}px);top:0;height:9px;border-left:2px solid #FFD166;'></span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    f"Gold marker: {free_transfers} estimated free transfers"
+                    if not chip_active
+                    else f"Gold marker: all transfers are free with {chip_choice}"
                 )
 
                 if auto_maximize_transfers or maximize_budget_transfers or num_transfers_to_consider > 0:
@@ -1342,6 +1371,10 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             num_to_use = best_k
                         else:
                             num_to_use = num_transfers_to_consider
+
+                    if num_to_use != num_transfers_to_consider:
+                        st.session_state["pending_transfer_count"] = num_to_use
+                        st.rerun()
 
                     transfer_suggestions = all_suggestions[:num_to_use]
 
