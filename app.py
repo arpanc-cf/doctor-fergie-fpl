@@ -1319,7 +1319,7 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                     f"""<div style="position:relative;height:34px;margin-top:-8px;">"""
                     f"""<div style="position:absolute;left:calc(12px + {marker_pct:.3f}% - {marker_offset_px:.3f}px);top:0;transform:{marker_transform};text-align:center;">"""
                     f"""<div style="height:13px;width:3px;background:#FFD84D;border-radius:2px;box-shadow:0 0 8px rgba(255,216,77,.8);margin:0 auto;"></div>"""
-                    f"""<div style="display:inline-block;margin-top:2px;padding:4px 9px;border-radius:999px;background:#FFD84D;color:#26002B;font-size:11px;font-weight:800;letter-spacing:.03em;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);">{marker_text}</div></div></div>"""
+                    f"""<div style="display:inline-block;margin-top:2px;padding:4px 9px;border-radius:999px;background:#FFD84D;color:#26002B;font-size:11px;font-weight:800;letter-spacing:.03em;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);">{marker_text}</div></div></div>""",
                     unsafe_allow_html=True,
                 )
                 st.caption(
