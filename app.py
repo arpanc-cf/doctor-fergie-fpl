@@ -1344,8 +1344,14 @@ def render_my_team_tab(bootstrap, players, fixtures_data, force_refresh):
                             # A Wildcard squad sticks around, so candidates are scored on
                             # their outlook over the next lookahead_gws gameweeks, not just
                             # the upcoming one.
-                            wc_scored = opt.compute_score(players, form_weight=0.7, ppg_weight=0.3)
-                            wc_scored = opt.apply_last_season_adjustment(wc_scored, prior_stats, weight=0.3)
+                            wc_scored = opt.compute_score(
+                                players,
+                                form_weight=opt.DEFAULT_FORM_WEIGHT,
+                                ppg_weight=opt.DEFAULT_PPG_WEIGHT,
+                            )
+                            wc_scored = opt.apply_last_season_adjustment(
+                                wc_scored, prior_stats, weight=opt.DEFAULT_PRIOR_SEASON_WEIGHT
+                            )
                             transfer_pool = opt.apply_fixture_adjustment(
                                 wc_scored, fixtures_data, next_gw, lookahead_gws, fixture_weight=0.5
                             )
@@ -1737,7 +1743,14 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
     formation = None if formation_choice == "Auto (best-scoring)" else formation_choice
 
     with st.expander("Advanced: Score Weighting"):
-        form_weight = st.slider("Weight on recent form", 0.0, 1.0, 0.7, 0.1)
+        form_weight = st.slider(
+            "Weight on underlying form",
+            0.0,
+            1.0,
+            opt.DEFAULT_FORM_WEIGHT,
+            0.05,
+            help="The remaining weight goes to points per game. Walk-forward backtesting favored a balanced blend.",
+        )
         budget_weight = st.slider("Weight on full budget utilization", 0.0, 1.0, 0.0, 0.1)
         st.caption(
             "At zero, money is only spent when it buys extra score — anything left over "
@@ -1759,7 +1772,14 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
             f"GW{default_start_gw} — a double gameweek boosts a player's score, and a blank "
             "wipes it out for that stretch."
         )
-        last_season_weight = st.slider("Weight on last season's performance", 0.0, 1.0, 0.3, 0.1)
+        last_season_weight = st.slider(
+            "Starting weight on last season",
+            0.0,
+            1.0,
+            opt.DEFAULT_PRIOR_SEASON_WEIGHT,
+            0.05,
+            help=f"This is the weight at 0 current-season minutes. It halves every {opt.PRIOR_SEASON_HALF_LIFE_MINUTES} current-season minutes.",
+        )
         st.caption(
             "At zero, last season is ignored entirely. Turning this up blends in each "
             "player's points-per-90 from their last completed season, which helps steady "
@@ -1814,15 +1834,19 @@ def render_optimizer_tab(bootstrap, players, fixtures_data, force_refresh):
     if maximize_clicked:
         st.caption(
             "Overriding every slider above — uses the full £100.0m budget with no "
-            "formation lock, and scores every player with a balanced default mix: mostly "
-            "recent form with points-per-game as a supporting signal, a meaningful boost "
-            "for good fixtures over the next 5 gameweeks, and a moderate allowance for "
-            "last season's form. Nothing trades away score just to spend more."
+            "formation lock, and scores every player with a backtested balance of "
+            "underlying form and points-per-game, a prior-season boost that fades as "
+            "current-season minutes accumulate, and the next 5 gameweeks of fixtures. "
+            "Nothing trades away score just to spend more."
         )
         with st.spinner("Fetching last-season stats for all players (first time only)..."):
             prior_stats, _, _, _ = load_prior_season_stats(tuple(players["id"]))
-        max_scored = opt.compute_score(players, form_weight=0.7, ppg_weight=0.3)
-        max_scored = opt.apply_last_season_adjustment(max_scored, prior_stats, weight=0.3)
+        max_scored = opt.compute_score(
+            players, form_weight=opt.DEFAULT_FORM_WEIGHT, ppg_weight=opt.DEFAULT_PPG_WEIGHT
+        )
+        max_scored = opt.apply_last_season_adjustment(
+            max_scored, prior_stats, weight=opt.DEFAULT_PRIOR_SEASON_WEIGHT
+        )
         max_scored = opt.apply_fixture_adjustment(
             max_scored, fixtures_data, default_start_gw, 5, fixture_weight=0.5
         )
