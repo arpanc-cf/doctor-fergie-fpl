@@ -38,10 +38,10 @@ def recommend_captain(
     players_df,
     fixtures,
     gw,
-    form_weight=0.7,
-    ppg_weight=0.3,
+    form_weight=opt.DEFAULT_FORM_WEIGHT,
+    ppg_weight=opt.DEFAULT_PPG_WEIGHT,
     prior_stats=None,
-    last_season_weight=0.3,
+    last_season_weight=opt.DEFAULT_PRIOR_SEASON_WEIGHT,
 ):
     """Rank the given player ids (typically a squad's starting XI) by
     expected score for gameweek `gw`, highest first. Returns a dataframe
