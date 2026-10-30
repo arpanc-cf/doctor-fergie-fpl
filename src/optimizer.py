@@ -41,6 +41,12 @@ SPEND_BONUS_SCALE = 40  # points-equivalent bonus for spending 100% of budget, a
 TRANSFER_BUDGET_DOMINANCE = 1000
 STARTING_CHANCE_THRESHOLD = 75  # below this % chance of playing, prefer a safer alternative over raw score
 
+# Walk-forward calibration defaults (2025/26 GW 26-38 holdout).
+DEFAULT_FORM_WEIGHT = 0.45
+DEFAULT_PPG_WEIGHT = 0.55
+DEFAULT_PRIOR_SEASON_WEIGHT = 0.25
+PRIOR_SEASON_HALF_LIFE_MINUTES = 180
+
 # FPL's own points-per-event values, used to convert underlying process
 # stats (xG, xA, clean sheet likelihood, saves) into a points-equivalent
 # "underlying form" — see compute_underlying_form.
@@ -175,7 +181,7 @@ def _availability_risk(player):
     return max(risk, 0.5) if status == "d" else risk
 
 
-def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
+def compute_score(players_df, form_weight=DEFAULT_FORM_WEIGHT, ppg_weight=DEFAULT_PPG_WEIGHT):
     """Add a 'score' column: a blend of underlying form (see
     compute_underlying_form) and points-per-game, scaled down for players
     who are doubtful per their listed chance of playing next round, and
@@ -196,7 +202,12 @@ def compute_score(players_df, form_weight=0.7, ppg_weight=0.3):
     return df
 
 
-def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
+def apply_last_season_adjustment(
+    scored_df,
+    prior_stats,
+    weight=DEFAULT_PRIOR_SEASON_WEIGHT,
+    half_life_minutes=PRIOR_SEASON_HALF_LIFE_MINUTES,
+):
     """Blend each player's score with their points-per-90 from their most
     recent completed season (see history.fetch_prior_season_stats) — a
     stabilizing prior against thin in-season form/PPG samples, especially
@@ -205,8 +216,11 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
     unchanged — judged on current-season data only, since there's nothing
     to blend in for them.
 
-    weight=0 leaves scores unchanged; weight=1 replaces the score with the
-    prior-season rate entirely (only for players who have one).
+    weight is the starting prior weight at zero current-season minutes. It
+    halves every half_life_minutes of current-season playing time; for
+    example, the default 25% prior becomes 12.5% after 180 minutes. A
+    weight of 0 leaves scores unchanged. Players without a prior rate are
+    left unchanged.
 
     Currently injured/suspended players must stay near-zero regardless of
     how good they were last season, so the prior-season component is
@@ -216,14 +230,19 @@ def apply_last_season_adjustment(scored_df, prior_stats, weight=0.3):
     """
     if weight <= 0 or not prior_stats:
         return scored_df
+    if half_life_minutes <= 0:
+        raise ValueError("half_life_minutes must be positive")
     df = scored_df.copy()
     last_ppg90 = df["id"].astype(str).map(
         lambda i: prior_stats.get(i, {}).get("points_per_90")
     )
     has_data = last_ppg90.notna()
     availability = _availability_multiplier(df)
-    df.loc[has_data, "score"] = (1 - weight) * df.loc[has_data, "score"] + weight * (
-        last_ppg90[has_data] * availability[has_data]
+    current_minutes = df["minutes"].fillna(0).clip(lower=0)
+    prior_weight = weight * (0.5 ** (current_minutes / half_life_minutes))
+    df.loc[has_data, "score"] = (
+        (1 - prior_weight[has_data]) * df.loc[has_data, "score"]
+        + prior_weight[has_data] * last_ppg90[has_data] * availability[has_data]
     )
     return df
 
